@@ -57,6 +57,68 @@ function fmtDayLabel(date) {
   return date.getDate()
 }
 
+function getMinutes(dtStr) {
+  const d = new Date(dtStr)
+  return d.getHours() * 60 + d.getMinutes()
+}
+
+function buildSuggestionLanes(daySuggestions) {
+  const withTimes = daySuggestions
+    .filter(s => s?.time_block?.start_time && s?.time_block?.end_time)
+    .map(s => ({
+      suggestion: s,
+      start: getMinutes(s.time_block.start_time),
+      end: getMinutes(s.time_block.end_time),
+    }))
+    .sort((a, b) => (a.start - b.start) || (a.end - b.end))
+
+  const styleBySuggestionId = {}
+  if (withTimes.length === 0) return styleBySuggestionId
+
+  const clusters = []
+  let current = []
+  let currentClusterEnd = -1
+
+  withTimes.forEach(item => {
+    if (current.length === 0 || item.start < currentClusterEnd) {
+      current.push(item)
+      currentClusterEnd = Math.max(currentClusterEnd, item.end)
+      return
+    }
+    clusters.push(current)
+    current = [item]
+    currentClusterEnd = item.end
+  })
+  if (current.length > 0) clusters.push(current)
+
+  clusters.forEach(cluster => {
+    const active = [] // { end, lane }
+    const laneAssignments = [] // { suggestionId, lane }
+    let maxLane = -1
+
+    cluster.forEach(item => {
+      for (let i = active.length - 1; i >= 0; i--) {
+        if (active[i].end <= item.start) active.splice(i, 1)
+      }
+
+      const used = new Set(active.map(a => a.lane))
+      let lane = 0
+      while (used.has(lane)) lane += 1
+
+      active.push({ end: item.end, lane })
+      laneAssignments.push({ suggestionId: item.suggestion.id, lane })
+      maxLane = Math.max(maxLane, lane)
+    })
+
+    const laneCount = maxLane + 1
+    laneAssignments.forEach(x => {
+      styleBySuggestionId[x.suggestionId] = { lane: x.lane, laneCount }
+    })
+  })
+
+  return styleBySuggestionId
+}
+
 export default function WeekView({
   events = [],
   suggestions = [],
@@ -117,6 +179,14 @@ export default function WeekView({
     })
     return map
   }, [suggestions, weekDates, showSuggestions])
+
+  const suggLaneByDay = useMemo(() => {
+    const map = {}
+    for (let i = 0; i < 7; i++) {
+      map[i] = buildSuggestionLanes(suggsByDay[i] || [])
+    }
+    return map
+  }, [suggsByDay])
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -188,11 +258,22 @@ export default function WeekView({
               {suggsByDay[dayIdx].map(s => {
                 const block = s.time_block
                 if (!block) return null
+                const baseStyle = getEventStyle(block.start_time, block.end_time)
+                const laneInfo = suggLaneByDay[dayIdx]?.[s.id] || { lane: 0, laneCount: 1 }
+                const laneWidth = 100 / laneInfo.laneCount
+                const laneLeft = laneInfo.lane * laneWidth
+                const lanePadPx = 2
+                const suggestionStyle = {
+                  ...baseStyle,
+                  left: `calc(${laneLeft}% + ${lanePadPx}px)`,
+                  width: `calc(${laneWidth}% - ${lanePadPx * 2}px)`,
+                  right: 'auto',
+                }
                 return (
                   <SuggestionBlock
                     key={s.id}
                     suggestion={s}
-                    style={getEventStyle(block.start_time, block.end_time)}
+                    style={suggestionStyle}
                     onClick={onSelectSuggestion}
                     onAccept={onAccept}
                     onReject={onReject}

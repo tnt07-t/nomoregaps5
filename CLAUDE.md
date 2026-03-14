@@ -48,6 +48,8 @@ User, UserPreference, Goal, GoalTask, CalendarEvent, TimeBlock, Task, Suggestion
 - Suggestions must remain role-agnostic (no default student assumptions)
 - Suggestion regeneration must clear stale in-range pending suggestions and recompute fresh candidates
 - Suggestions must diversify across adjacent time blocks (title and category fatigue penalties in scorer)
+- Suggestion blocks must not expand on hover; actions are handled in side panel
+- Overlapping suggestion intervals must render in separate lanes (side-by-side), not stacked
 - Onboarding must use typed API helpers (`api.createGoal`, `api.getGoals`) and must not silently swallow save failures
 - Backend uses Python 3.11 venv (Python 3.14 breaks pydantic v1)
 - `from __future__ import annotations` required in Python 3.11 files using `X | Y` union types
@@ -130,6 +132,7 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 ✅ Suggestion runs now clear stale pending rows before regeneration (accepted history retained)
 ✅ Strong diversification tuning: adjacent-title penalty + category fatigue + novelty bonus
 ✅ Onboarding goals persist reliably and load in preview/dashboard via correct API methods
+✅ Suggestion hover expansion removed; overlap-safe lane layout added to calendar week view
 
 ## Remaining / Stretch
 - [ ] Mode selector (Productive / Low Energy / Passive) → re-generate suggestions on change

@@ -5,7 +5,7 @@
 ---
 
 ## Current Status
-**Phase:** 5i — Onboarding Goal Persistence Fix ✅ COMPLETE
+**Phase:** 5j — Suggestion Block Collision UI Fix ✅ COMPLETE
 **Last updated:** 2026-03-14
 **Backend:** Running on http://localhost:8000
 **Frontend:** Running on http://localhost:3000
@@ -342,6 +342,22 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 
 ---
 
+### Phase 5j — Suggestion Block Collision UI Fix (2026-03-14)
+**Goal:** Prevent suggestion hover expansion overlap and avoid stacked suggestion blocks in the same time period.
+
+#### Files Updated
+- `frontend/src/components/calendar/SuggestionBlock.jsx` — removed hover-expand accept/reject overlay; block remains fixed size
+- `frontend/src/components/calendar/WeekView.jsx` — added lane layout for overlapping suggestion intervals so concurrent suggestions render side-by-side instead of overlapping
+
+#### Build Results
+- ✅ `npm run build` passes
+
+#### Design Decisions
+- Accept/reject actions remain in the right-side detail panel after selecting a suggestion block
+- Suggestion lane layout uses deterministic interval clustering and lane assignment per day
+
+---
+
 ## Phase 6 — Remaining / Stretch (PLANNED)
 - [ ] Mode selector (Productive / Low Energy / Passive) — re-generates suggestions on change
 - [ ] Goals router: trigger LLM task generation on goal create/update (BackgroundTasks)
@@ -393,3 +409,4 @@ npm run dev   # port 3000
 | 2026-03-14 | 5g | Pending suggestions accumulated and caused repeated stale outputs | ✅ fixed | generation now clears in-range pending suggestions before recomputing |
 | 2026-03-14 | 5h | Suggestions still felt repetitive across adjacent gaps | ✅ fixed | title/category fatigue + adjacent repeat penalty + novelty bonus in scorer |
 | 2026-03-14 | 5i | Onboarding goals not appearing in preview/calendar due to broken API calls | ✅ fixed | switched onboarding pages to `api.createGoal` and `api.getGoals`, with explicit save errors |
+| 2026-03-14 | 5j | Suggestion blocks expanded on hover and overlapped nearby blocks | ✅ fixed | removed hover expansion and added side-by-side lane layout for overlapping suggestion intervals |
