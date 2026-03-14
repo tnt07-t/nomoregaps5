@@ -32,6 +32,7 @@ export default function OnboardingGoals() {
   const [goals, setGoals] = useState([])
   const [selected, setSelected] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   const [editTitle, setEditTitle]       = useState('')
   const [editHours, setEditHours]       = useState(2)
@@ -81,19 +82,38 @@ export default function OnboardingGoals() {
   }
 
   async function handlePreviewCalendar() {
+    setSaveError('')
     setSaving(true)
     saveEdit()
+    if (!userId) {
+      setSaveError('Please sign in again before saving goals.')
+      setSaving(false)
+      return
+    }
+
+    const allGoals = goals.map((g, i) => ({
+      ...g,
+      title: i === selected ? editTitle : g.title,
+      weekly_hours: i === selected ? editHours : g.weekly_hours,
+      priority: i === selected ? editPriority : g.priority,
+      tasks: i === selected ? editTasks : g.tasks,
+    }))
+
+    if (allGoals.length === 0) {
+      setSaveError('Add at least one goal before continuing.')
+      setSaving(false)
+      return
+    }
+
     try {
-      const allGoals = goals.map((g, i) => ({
-        ...g,
-        title: i === selected ? editTitle : g.title,
-        weekly_hours: i === selected ? editHours : g.weekly_hours,
-        priority: i === selected ? editPriority : g.priority,
-        tasks: i === selected ? editTasks : g.tasks,
-      }))
+      const existing = await api.getGoals(userId)
+      if (Array.isArray(existing) && existing.length > 0) {
+        await Promise.all(existing.map(g => api.deleteGoal(g.id)))
+      }
+
       for (const [idx, g] of allGoals.entries()) {
-        await api.post('/goals/', {
-          user_id: parseInt(userId),
+        await api.createGoal({
+          user_id: parseInt(userId, 10),
           title: g.title,
           category: g.category,
           weekly_target_minutes: (g.weekly_hours || 2) * 60,
@@ -104,8 +124,12 @@ export default function OnboardingGoals() {
           })),
         })
       }
-    } catch (_) { /* non-fatal for demo */ }
-    navigate('/onboarding/preview')
+      navigate('/onboarding/preview')
+    } catch (err) {
+      setSaveError(err?.message || 'Could not save goals. Try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -254,6 +278,9 @@ export default function OnboardingGoals() {
               {saving ? 'Saving…' : 'Preview Calendar'}
             </button>
           </div>
+          {saveError && (
+            <p className="text-xs text-red-600 mt-2">{saveError}</p>
+          )}
         </div>
       </div>
     </div>

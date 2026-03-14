@@ -42,7 +42,11 @@ export default function OnboardingPreview() {
   useEffect(() => {
     async function load() {
       try {
-        const data = await api.get(`/goals/?user_id=${userId}`)
+        if (!userId) {
+          setGoals([])
+          return
+        }
+        const data = await api.getGoals(userId)
         setGoals(data || [])
       } catch (_) { setGoals([]) }
       finally { setLoading(false) }

@@ -48,6 +48,7 @@ User, UserPreference, Goal, GoalTask, CalendarEvent, TimeBlock, Task, Suggestion
 - Suggestions must remain role-agnostic (no default student assumptions)
 - Suggestion regeneration must clear stale in-range pending suggestions and recompute fresh candidates
 - Suggestions must diversify across adjacent time blocks (title and category fatigue penalties in scorer)
+- Onboarding must use typed API helpers (`api.createGoal`, `api.getGoals`) and must not silently swallow save failures
 - Backend uses Python 3.11 venv (Python 3.14 breaks pydantic v1)
 - `from __future__ import annotations` required in Python 3.11 files using `X | Y` union types
 
@@ -128,6 +129,7 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 ✅ Student-biased default task wording removed; anti-repetition scoring penalties added
 ✅ Suggestion runs now clear stale pending rows before regeneration (accepted history retained)
 ✅ Strong diversification tuning: adjacent-title penalty + category fatigue + novelty bonus
+✅ Onboarding goals persist reliably and load in preview/dashboard via correct API methods
 
 ## Remaining / Stretch
 - [ ] Mode selector (Productive / Low Energy / Passive) → re-generate suggestions on change

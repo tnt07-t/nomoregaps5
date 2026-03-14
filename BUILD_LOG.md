@@ -5,7 +5,7 @@
 ---
 
 ## Current Status
-**Phase:** 5h — Strong Diversification Tuning ✅ COMPLETE
+**Phase:** 5i — Onboarding Goal Persistence Fix ✅ COMPLETE
 **Last updated:** 2026-03-14
 **Backend:** Running on http://localhost:8000
 **Frontend:** Running on http://localhost:3000
@@ -328,6 +328,20 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 
 ---
 
+### Phase 5i — Onboarding Goal Persistence Fix (2026-03-14)
+**Goal:** Ensure onboarding goals/subtasks are actually saved and visible in preview/dashboard calendar view.
+
+#### Files Updated
+- `frontend/src/pages/OnboardingGoals.jsx` — replaced broken `api.post('/goals/')` with `api.createGoal(...)`; added pre-save validation for auth and empty goals; now surfaces save failures instead of silent catch
+- `frontend/src/pages/OnboardingGoals.jsx` — before creating onboarding goals, clears existing user goals to avoid duplicate onboarding runs
+- `frontend/src/pages/OnboardingPreview.jsx` — replaced broken `api.get('/goals/...')` with `api.getGoals(userId)`
+
+#### Validation
+- ✅ `npm run build` passes
+- ✅ onboarding flow now uses existing API client methods end-to-end (no undefined method calls)
+
+---
+
 ## Phase 6 — Remaining / Stretch (PLANNED)
 - [ ] Mode selector (Productive / Low Energy / Passive) — re-generates suggestions on change
 - [ ] Goals router: trigger LLM task generation on goal create/update (BackgroundTasks)
@@ -378,3 +392,4 @@ npm run dev   # port 3000
 | 2026-03-14 | 5f | Suggestions were dominated by student-specific `Review Notes` | ✅ fixed | neutral task rename + legacy limit backfill + anti-repetition penalties |
 | 2026-03-14 | 5g | Pending suggestions accumulated and caused repeated stale outputs | ✅ fixed | generation now clears in-range pending suggestions before recomputing |
 | 2026-03-14 | 5h | Suggestions still felt repetitive across adjacent gaps | ✅ fixed | title/category fatigue + adjacent repeat penalty + novelty bonus in scorer |
+| 2026-03-14 | 5i | Onboarding goals not appearing in preview/calendar due to broken API calls | ✅ fixed | switched onboarding pages to `api.createGoal` and `api.getGoals`, with explicit save errors |
