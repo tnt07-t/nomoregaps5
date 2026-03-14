@@ -27,5 +27,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-
 .env
+
+# ── Internal build notes ─────────────────────────────────
+BUILD_LOG.md
+CLAUDE.md
