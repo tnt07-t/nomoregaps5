@@ -81,7 +81,7 @@ export default function LandingPage() {
 
     if (errorParam) {
       if (errorParam === 'permission_denied') {
-        setError('Google Calendar access was denied. TimeFiller needs calendar access to work.')
+        setError('Google Calendar access was denied. NoMoreGaps needs calendar access to work.')
       } else if (errorParam === 'oauth_failed') {
         setError('Google sign-in failed. Please try again.')
       } else {

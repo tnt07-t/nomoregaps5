@@ -6,9 +6,10 @@ import OnboardingAudio from './pages/OnboardingAudio'
 import OnboardingGoals from './pages/OnboardingGoals'
 import OnboardingPreview from './pages/OnboardingPreview'
 import Dashboard from './pages/Dashboard'
+import GoalManagement from './pages/GoalManagement'
 
 function ProtectedRoute({ children }) {
-  const userId = localStorage.getItem('timefiller_user_id')
+  const userId = localStorage.getItem('nomoregaps_user_id')
   if (!userId) return <Navigate to="/" replace />
   return children
 }
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/onboarding/goals"   element={<ProtectedRoute><OnboardingGoals /></ProtectedRoute>} />
         <Route path="/onboarding/preview" element={<ProtectedRoute><OnboardingPreview /></ProtectedRoute>} />
         <Route path="/dashboard"          element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/goals"              element={<ProtectedRoute><GoalManagement /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

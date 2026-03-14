@@ -1,5 +1,5 @@
 /**
- * BrandHeader - pencil icon + "TimeFiller" + "RECLAIM YOUR DAY"
+ * BrandHeader - pencil icon + "NoMoreGaps" + "RECLAIM YOUR DAY"
  */
 export default function BrandHeader() {
   return (
@@ -21,7 +21,7 @@ export default function BrandHeader() {
       </svg>
 
       <h1 className="font-serif text-3xl text-stone-800 tracking-tight leading-none">
-        TimeFiller
+        NoMoreGaps
       </h1>
       <p className="text-xs text-stone-400 tracking-[0.3em] uppercase font-medium">
         Reclaim Your Day

@@ -5,7 +5,7 @@
 ---
 
 ## Current Status
-**Phase:** 2 — Calendar View + Suggestion Engine ✅ COMPLETE
+**Phase:** 3 — Goal Management ✅ COMPLETE
 **Last updated:** 2026-03-14
 **Backend:** Running on http://localhost:8000
 **Frontend:** Running on http://localhost:3000

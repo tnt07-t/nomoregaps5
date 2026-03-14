@@ -10,7 +10,7 @@ from routers import auth, preferences, goals, events, suggestions, feedback
 from seed_tasks import seed_tasks
 
 app = FastAPI(
-    title="TimeFiller API",
+    title="NoMoreGaps API",
     description="AI-powered dead-time optimizer — reclaim your day.",
     version="0.1.0",
 )
@@ -50,7 +50,7 @@ def startup():
 
 @app.get("/")
 def health():
-    return {"status": "ok", "app": "TimeFiller API", "version": "0.1.0"}
+    return {"status": "ok", "app": "NoMoreGaps API", "version": "0.1.0"}
 
 
 @app.get("/health")

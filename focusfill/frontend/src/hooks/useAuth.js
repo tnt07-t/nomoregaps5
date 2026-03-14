@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 
-const USER_ID_KEY = 'timefiller_user_id'
-const USER_NAME_KEY = 'timefiller_user_name'
-const USER_EMAIL_KEY = 'timefiller_user_email'
+const USER_ID_KEY = 'nomoregaps_user_id'
+const USER_NAME_KEY = 'nomoregaps_user_name'
+const USER_EMAIL_KEY = 'nomoregaps_user_email'
 
 export function useAuth() {
   const [userId, setUserId] = useState(() => {

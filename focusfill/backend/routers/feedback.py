@@ -72,10 +72,12 @@ def _write_to_gcal(suggestion: models.Suggestion, db: Session) -> str | None:
     """Write an accepted suggestion to Google Calendar. Returns gcal event id or None."""
     try:
         user = db.query(models.User).filter(models.User.id == suggestion.user_id).first()
-        if not user or not user.access_token:
+        if not user or not user.refresh_token:
+            print("[feedback] No refresh token — cannot write to GCal")
             return None
 
         from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
         from googleapiclient.discovery import build
 
         creds = Credentials(
@@ -84,28 +86,39 @@ def _write_to_gcal(suggestion: models.Suggestion, db: Session) -> str | None:
             token_uri="https://oauth2.googleapis.com/token",
             client_id=os.getenv("GOOGLE_CLIENT_ID"),
             client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-            scopes=["https://www.googleapis.com/auth/calendar.events"],
+            scopes=["https://www.googleapis.com/auth/calendar",
+                    "https://www.googleapis.com/auth/calendar.events"],
         )
+
+        # Refresh the token if expired — this is the key fix
+        if not creds.valid:
+            creds.refresh(Request())
+            # Persist the new access token so future calls don't need to refresh again
+            user.access_token = creds.token
+            db.commit()
+
         service = build("calendar", "v3", credentials=creds, cache_discovery=False)
 
         block = suggestion.time_block
         task  = suggestion.task
+        tz    = user.timezone or "America/New_York"
+
+        # Format datetimes as RFC3339 with timezone
+        def fmt(dt):
+            return dt.strftime("%Y-%m-%dT%H:%M:%S")
 
         event_body = {
-            "summary": task.title if task else "TimeFiller Task",
-            "description": suggestion.reason or "",
-            "start": {
-                "dateTime": block.start_time.isoformat() + "Z",
-                "timeZone": "UTC",
-            },
-            "end": {
-                "dateTime": block.end_time.isoformat() + "Z",
-                "timeZone": "UTC",
-            },
+            "summary": task.title if task else "NoMoreGaps Task",
+            "description": (suggestion.reason or "") + "\n\nScheduled by NoMoreGaps",
+            "start": {"dateTime": fmt(block.start_time), "timeZone": tz},
+            "end":   {"dateTime": fmt(block.end_time),   "timeZone": tz},
+            "colorId": "2",  # sage green in GCal
         }
 
         created = service.events().insert(calendarId="primary", body=event_body).execute()
-        return created.get("id")
+        gcal_id = created.get("id")
+        print(f"[feedback] GCal event created: {gcal_id}")
+        return gcal_id
 
     except Exception as exc:
         print(f"[feedback] GCal write-back failed: {exc}")

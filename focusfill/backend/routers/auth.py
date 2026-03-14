@@ -138,7 +138,7 @@ def google_oauth_callback(
 @router.post("/mock-login")
 def mock_login(db: Session = Depends(get_db)):
     """Create or return demo user for dev/mock mode."""
-    demo_email = "demo@timefiller.app"
+    demo_email = "demo@nomoregaps.app"
 
     user = db.query(models.User).filter(models.User.email == demo_email).first()
     if not user:

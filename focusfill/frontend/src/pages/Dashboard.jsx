@@ -161,7 +161,7 @@ export default function Dashboard() {
     if (userId === null) {
       // Wait briefly to allow storage read
       const t = setTimeout(() => {
-        const stored = localStorage.getItem('timefiller_user_id')
+        const stored = localStorage.getItem('nomoregaps_user_id')
         if (!stored) navigate('/')
       }, 200)
       return () => clearTimeout(t)
@@ -273,7 +273,7 @@ export default function Dashboard() {
       {/* ── Top Bar ──────────────────────────────────────────────────────────── */}
       <header className="flex-shrink-0 flex items-center justify-between h-14 px-4 border-b border-stone-200 bg-white z-30">
         {/* Brand */}
-        <span className="font-serif text-lg text-stone-800 font-bold select-none">TimeFiller</span>
+        <span className="font-serif text-lg text-stone-800 font-bold select-none">NoMoreGaps</span>
 
         {/* Week nav */}
         <div className="flex items-center gap-2">
@@ -345,8 +345,14 @@ export default function Dashboard() {
             {/* Goals section */}
             <div className="mt-5">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold text-stone-600 uppercase tracking-wide">Goals</span>
-                <button className="text-stone-400 hover:text-stone-600 text-lg leading-none w-5 h-5 flex items-center justify-center">+</button>
+                <button
+                  onClick={() => navigate('/goals')}
+                  className="text-xs font-semibold text-stone-600 uppercase tracking-wide hover:text-stone-900 transition-colors"
+                >Goals</button>
+                <button
+                  onClick={() => navigate('/goals')}
+                  className="text-stone-400 hover:text-stone-600 text-lg leading-none w-5 h-5 flex items-center justify-center"
+                >+</button>
               </div>
 
               {goals.length === 0 ? (

@@ -13,5 +13,5 @@ else
     pip install -r requirements.txt
 fi
 
-echo "Starting TimeFiller backend on http://localhost:8000"
+echo "Starting NoMoreGaps backend on http://localhost:8000"
 uvicorn main:app --reload --port 8000
