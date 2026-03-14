@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 import schemas
+from datetime import timedelta as _td
 from services.gap_detector import detect_gaps
 from services.suggestion_engine import get_top_suggestions
 
@@ -81,8 +82,11 @@ def generate_suggestions(
         day_key = ev.start_time.date()
         events_by_day.setdefault(day_key, []).append(ev)
 
-    # Detect gaps for each day
+    # Detect gaps for each day, then subdivide large ones
     all_gaps = []
+    CHUNK_MINUTES = 60   # max size per sub-block
+    MAX_BEFORE_SPLIT = 90  # gaps longer than this get split
+
     for day, day_events in events_by_day.items():
         gaps = detect_gaps(
             events=day_events,
@@ -91,7 +95,33 @@ def generate_suggestions(
             min_gap_minutes=min_gap,
             transition_buffer=buffer,
         )
-        all_gaps.extend(gaps)
+        for gap in gaps:
+            dur = gap["duration_minutes"]
+            if dur <= MAX_BEFORE_SPLIT:
+                all_gaps.append(gap)
+            else:
+                # Split into CHUNK_MINUTES pieces so each gets a different task
+                cursor = gap["start_time"]
+                chunk_idx = 0
+                while cursor < gap["end_time"]:
+                    chunk_end = min(cursor + timedelta(minutes=CHUNK_MINUTES), gap["end_time"])
+                    chunk_dur = int((chunk_end - cursor).total_seconds() / 60)
+                    if chunk_dur < min_gap:
+                        break
+                    sub = dict(gap)
+                    sub["start_time"]       = cursor
+                    sub["end_time"]         = chunk_end
+                    sub["duration_minutes"] = chunk_dur
+                    # Only first chunk inherits prev_event; only last inherits next_event
+                    if chunk_idx > 0:
+                        sub["prev_event_id"]    = None
+                        sub["prev_event_title"] = None
+                    if chunk_end < gap["end_time"]:
+                        sub["next_event_id"]    = None
+                        sub["next_event_title"] = None
+                    all_gaps.append(sub)
+                    cursor = chunk_end
+                    chunk_idx += 1
 
     if not events_by_day and not all_gaps:
         # No events synced yet — return empty but don't error
@@ -153,22 +183,27 @@ def generate_suggestions(
         enriched["time_block_id"] = block.id
         enriched_gaps.append(enriched)
 
-    # Build daily_usage: count pending/accepted suggestions per task per day
-    # This ensures daily_limit is respected across generation calls
+    # Build daily_usage and weekly_usage dicts to enforce limits
     today_str = str(date_type.today())
-    today_suggestions = (
+    week_start_str = str(date_type.today() - timedelta(days=date_type.today().weekday()))
+
+    period_suggestions = (
         db.query(models.Suggestion)
         .join(models.TimeBlock, models.Suggestion.time_block_id == models.TimeBlock.id)
         .filter(
             models.Suggestion.user_id == user_id,
             models.Suggestion.status.in_(["pending", "accepted"]),
-            models.TimeBlock.date == today_str,
+            models.TimeBlock.date >= week_start_str,
         )
         .all()
     )
     daily_usage: dict = {}
-    for s in today_suggestions:
-        daily_usage[s.task_id] = daily_usage.get(s.task_id, 0) + 1
+    weekly_usage: dict = {}
+    for s in period_suggestions:
+        block_date = s.time_block.date if s.time_block else None
+        weekly_usage[s.task_id] = weekly_usage.get(s.task_id, 0) + 1
+        if block_date == today_str:
+            daily_usage[s.task_id] = daily_usage.get(s.task_id, 0) + 1
 
     scored = get_top_suggestions(
         gaps=enriched_gaps,
@@ -177,6 +212,7 @@ def generate_suggestions(
         feedback_history=feedback_history,
         top_n=3,
         daily_usage=daily_usage,
+        weekly_usage=weekly_usage,
     )
 
     # Store suggestions (skip duplicates for same block+task)

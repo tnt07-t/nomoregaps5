@@ -151,6 +151,7 @@ def get_real_events(user_id: int, access_token: str, refresh_token: str, week_st
     try:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
+        from googleapiclient.errors import HttpError
 
         creds = Credentials(
             token=access_token,
@@ -210,6 +211,10 @@ def get_real_events(user_id: int, access_token: str, refresh_token: str, week_st
 
         return events
 
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status in (401, 403):
+            raise RuntimeError("Google Calendar authorization failed") from exc
+        raise RuntimeError(f"Google Calendar API error (status={status})") from exc
     except Exception as exc:
-        print(f"[calendar_service] get_real_events error: {exc}")
-        return []
+        raise RuntimeError(f"Google Calendar fetch failed: {exc}") from exc

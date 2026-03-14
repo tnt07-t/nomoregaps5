@@ -12,6 +12,7 @@ from database import get_db
 import models
 import schemas
 from services.calendar_service import get_mock_events, get_real_events
+from services.llm_service import reprioritize_tasks
 
 USE_MOCK_DATA = os.getenv("USE_MOCK_DATA", "true").lower() == "true"
 SYNC_COOLDOWN_HOURS = 6
@@ -52,12 +53,58 @@ def sync_events(
     if USE_MOCK_DATA:
         raw_events = get_mock_events(user_id, week_start)
     else:
-        raw_events = get_real_events(
-            user_id=user_id,
-            access_token=user.access_token or "",
-            refresh_token=user.refresh_token or "",
-            week_start=week_start,
-        )
+        if not user.access_token:
+            raise HTTPException(
+                status_code=401,
+                detail="Google Calendar not connected. Please sign in with Google again.",
+            )
+
+        # Refresh access token before GCal call (tokens expire after 1 hour)
+        try:
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request as GRequest
+            creds = Credentials(
+                token=user.access_token,
+                refresh_token=user.refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=os.getenv("GOOGLE_CLIENT_ID"),
+                client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+                scopes=["https://www.googleapis.com/auth/calendar",
+                        "https://www.googleapis.com/auth/calendar.events"],
+            )
+            if not creds.valid:
+                if not user.refresh_token:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Google token expired and no refresh token is available. Please reconnect Google.",
+                    )
+                creds.refresh(GRequest())
+                user.access_token = creds.token
+                db.commit()
+                print("[events] Access token refreshed")
+        except HTTPException:
+            raise
+        except Exception as tok_err:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Google token refresh failed: {tok_err}",
+            )
+
+        try:
+            raw_events = get_real_events(
+                user_id=user_id,
+                access_token=user.access_token or "",
+                refresh_token=user.refresh_token or "",
+                week_start=week_start,
+            )
+        except RuntimeError as cal_err:
+            msg = str(cal_err).lower()
+            if "authorization failed" in msg:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Google Calendar authorization failed. Please reconnect Google.",
+                )
+            raise HTTPException(status_code=502, detail=str(cal_err))
 
     # Upsert events
     for ev_data in raw_events:
@@ -91,6 +138,21 @@ def sync_events(
     # Update last_synced_at
     user.last_synced_at = datetime.utcnow()
     db.commit()
+
+    # Re-score tasks based on user goals + feedback patterns (async-friendly: runs in same request)
+    try:
+        goals = db.query(models.Goal).filter(models.Goal.user_id == user_id, models.Goal.is_active == True).all()
+        tasks_all = db.query(models.Task).all()
+        feedback_history = db.query(models.FeedbackEvent).filter(models.FeedbackEvent.user_id == user_id).all()
+        boosts = reprioritize_tasks(goals, tasks_all, feedback_history)
+        for task in tasks_all:
+            if task.id in boosts:
+                task.priority_boost = boosts[task.id]
+        if boosts:
+            db.commit()
+            print(f"[events] Reprioritized {len(boosts)} tasks after sync")
+    except Exception as exc:
+        print(f"[events] Reprioritize skipped: {exc}")
 
     return _get_week_events(user_id, db)
 

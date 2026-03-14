@@ -72,7 +72,8 @@ class GoalTask(Base):
     preferred_time_of_day = Column(String, default="any")  # any, morning, afternoon, evening
     location_requirement = Column(String, default="anywhere")  # anywhere, home, office
     mobility_requirement = Column(String, default="stationary")  # stationary, mobile
-    daily_limit = Column(Integer, nullable=True)  # max times to suggest per day (null = unlimited)
+    daily_limit = Column(Integer, nullable=True)
+    weekly_limit = Column(Integer, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     goal = relationship("Goal", back_populates="tasks")
@@ -130,7 +131,9 @@ class Task(Base):
     goal_tag = Column(String, nullable=True)
     repeatable = Column(Boolean, default=True)
     metadata_json = Column(Text, nullable=True)
-    daily_limit = Column(Integer, nullable=True)  # max suggestions per day (null = unlimited)
+    daily_limit = Column(Integer, nullable=True)
+    weekly_limit = Column(Integer, nullable=True)
+    priority_boost = Column(Float, default=0.0)
     llm_generated = Column(Boolean, default=False)
 
     suggestions = relationship("Suggestion", back_populates="task")

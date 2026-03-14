@@ -45,17 +45,20 @@ def score_task_for_block(task, gap: dict, user_goals: list, feedback_history: li
 
 def get_top_suggestions(gaps: list, tasks: list, user_goals: list,
                          feedback_history: list, top_n: int = 3,
-                         daily_usage: dict | None = None) -> list:
+                         daily_usage: dict | None = None,
+                         weekly_usage: dict | None = None) -> list:
     """
     For each gap, score all tasks and return the top-N (task, gap, score, reason) tuples.
-    Enforces daily_limit: tasks already at their daily cap are skipped.
+    Enforces daily_limit and weekly_limit.
 
-    daily_usage: {task_id: count} of tasks already suggested/accepted today in the DB.
-    We also track within this generation pass so the same task isn't pushed into
-    every single gap if it has a low daily_limit.
+    daily_usage:  {task_id: count} of times suggested/accepted today.
+    weekly_usage: {task_id: count} of times suggested/accepted this week.
+    session_usage tracks assignments within this single generation pass.
     """
     if daily_usage is None:
         daily_usage = {}
+    if weekly_usage is None:
+        weekly_usage = {}
 
     # Count how many times we assign each task in this generation pass
     session_usage: dict = {}
@@ -64,15 +67,23 @@ def get_top_suggestions(gaps: list, tasks: list, user_goals: list,
     for gap in gaps:
         scored = []
         for task in tasks:
-            task_id     = _attr(task, "id")
-            daily_limit = _attr(task, "daily_limit", None)
+            task_id      = _attr(task, "id")
+            daily_limit  = _attr(task, "daily_limit", None)
+            weekly_limit = _attr(task, "weekly_limit", None)
+            p_boost      = _attr(task, "priority_boost", 0.0) or 0.0
 
             if daily_limit is not None:
                 used = daily_usage.get(task_id, 0) + session_usage.get(task_id, 0)
                 if used >= daily_limit:
-                    continue  # already at cap — skip this task for today
+                    continue
+
+            if weekly_limit is not None:
+                used_week = weekly_usage.get(task_id, 0) + session_usage.get(task_id, 0)
+                if used_week >= weekly_limit:
+                    continue
 
             s = score_task_for_block(task, gap, user_goals, feedback_history)
+            s += p_boost * 30  # scale boost into scoring range
             scored.append((task, gap, s))
 
         scored.sort(key=lambda x: x[2], reverse=True)

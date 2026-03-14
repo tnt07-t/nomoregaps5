@@ -92,7 +92,24 @@ export default function WeekView({
     const map = {}
     for (let i = 0; i < 7; i++) map[i] = []
     if (!showSuggestions) return map
+
+    // Per time block: show accepted if any, otherwise only the top-scored pending one
+    const blockBest = {}
     suggestions.forEach(s => {
+      if (s.status === 'rejected') return
+      const blockId = s.time_block?.id
+      if (!blockId) return
+      const cur = blockBest[blockId]
+      if (!cur) {
+        blockBest[blockId] = s
+      } else if (s.status === 'accepted') {
+        blockBest[blockId] = s
+      } else if (cur.status !== 'accepted' && (s.score || 0) > (cur.score || 0)) {
+        blockBest[blockId] = s
+      }
+    })
+
+    Object.values(blockBest).forEach(s => {
       const startTime = s.time_block?.start_time
       if (!startTime) return
       const idx = weekDates.findIndex(d => isSameDay(startTime, d))

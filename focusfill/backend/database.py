@@ -36,7 +36,10 @@ def _migrate():
     migrations = [
         "ALTER TABLE tasks ADD COLUMN daily_limit INTEGER",
         "ALTER TABLE tasks ADD COLUMN llm_generated BOOLEAN DEFAULT 0",
+        "ALTER TABLE tasks ADD COLUMN weekly_limit INTEGER",
+        "ALTER TABLE tasks ADD COLUMN priority_boost REAL DEFAULT 0.0",
         "ALTER TABLE goal_tasks ADD COLUMN daily_limit INTEGER",
+        "ALTER TABLE goal_tasks ADD COLUMN weekly_limit INTEGER",
     ]
     with engine.connect() as conn:
         for sql in migrations:

@@ -5,7 +5,7 @@
 ---
 
 ## Current Status
-**Phase:** 4 — LLM Integration + Daily Limits ✅ COMPLETE
+**Phase:** 5c — GCal Auth Reliability ✅ COMPLETE
 **Last updated:** 2026-03-14
 **Backend:** Running on http://localhost:8000
 **Frontend:** Running on http://localhost:3000
@@ -194,9 +194,63 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 
 ---
 
-## Phase 5 — Polish / Stretch (PLANNED)
+### Phase 4b — Bug Fixes (2026-03-14)
+**Goal:** Fix DB migration crash and suggestion engine name collision bug.
+
+#### Fixes Applied
+- `database.py` — `_migrate()` already existed but didn't include `daily_limit`/`llm_generated`; confirmed it runs on `create_tables()` startup hook
+- `routers/suggestions.py` — `date` query param was shadowing `datetime.date` import, causing `None.today()` crash → renamed import to `date as date_type`
+- **Result:** Backend starts cleanly, suggestions generate correctly
+
+---
+
+### Phase 5 — Suggestion Quality + LLM Re-prioritization (2026-03-14)
+**Goal:** Fix accept behavior, prevent task repetition, split large blocks, LLM re-scores tasks on sync.
+
+#### Files Updated
+- `database.py` — `_migrate()` now adds `weekly_limit INTEGER` and `priority_boost REAL DEFAULT 0.0` to `tasks`; `weekly_limit INTEGER` to `goal_tasks`
+- `models.py` — `Task` gets `weekly_limit` + `priority_boost` columns; `GoalTask` gets `weekly_limit`
+- `seed_tasks.py` — all 12 tasks updated with `weekly_limit` (Reply to Emails: 5/wk, Tidy Desk: 3/wk, Chess: 14/wk, etc.)
+- `routers/feedback.py` — on accept, all OTHER pending suggestions for the same `time_block_id` are auto-rejected (sibling dismissal)
+- `routers/suggestions.py` — large gaps (>90 min) are subdivided into 60-min chunks, each becoming its own TimeBlock with a different task; weekly_usage dict computed from week's pending/accepted suggestions and passed to engine
+- `services/suggestion_engine.py` — `get_top_suggestions()` now accepts `weekly_usage` dict; enforces `weekly_limit`; applies `task.priority_boost * 30` to score
+- `services/llm_service.py` — added `reprioritize_tasks(user_goals, tasks, feedback_history) → {task_id: float}` using `claude-haiku-4-5-20251001`; returns -0.3 to +0.3 boosts per task
+- `routers/events.py` — after each sync, calls `reprioritize_tasks()` and writes `priority_boost` back to Task rows in DB
+- `frontend/WeekView.jsx` — deduplicates by `time_block_id` before rendering: shows accepted suggestion if any, else only highest-scored pending one per block (no more overlapping blocks)
+
+#### Design Decisions
+- Block subdivision: >90 min gap → 60-min chunks (min chunk = 15 min); each chunk gets independent scoring so different tasks fill each slot
+- Weekly limits enforced in addition to daily limits; session_usage tracks assignments within a single generation pass (prevents over-assignment in one run)
+- `priority_boost` stored globally on Task table (not per-user) — fine for single-user demo; updated by LLM Haiku on every real sync
+- Frontend renders max 1 SuggestionBlock per time_block, not 3 stacked
+
+#### Known Issues Fixed
+- 🐛 Accept didn't remove other suggestions for same slot → sibling rejection added to feedback.py
+- 🐛 3 suggestions per block all rendered at same pixel position → WeekView now deduplicates per block
+- 🐛 Same task ("Reply to Emails") could fill every gap all day → daily + weekly limits enforced
+- 🐛 Large 3-hour gap generated 3 identical-position suggestions → subdivision creates distinct sub-blocks
+
+---
+
+### Phase 5c — GCal Auth Reliability (2026-03-14)
+**Goal:** Fix silent Google Calendar failures caused by expired/invalid tokens.
+
+#### Files Updated
+- `services/calendar_service.py` — stop returning silent empty results on API/auth errors; raise explicit runtime errors
+- `routers/events.py` — validate token presence, refresh with refresh_token, return `401` for reconnect-required states, return `502` for non-auth Google API failures
+
+#### Build Results
+- ✅ `python -m py_compile routers/events.py services/calendar_service.py` passes
+- ✅ `python -c "from main import app"` passes
+
+#### Known Issues Fixed
+- 🐛 Expired Google access token looked like "no events" due to silent fallback → now surfaces clear API errors
+
+---
+
+## Phase 6 — Remaining / Stretch (PLANNED)
 - [ ] Mode selector (Productive / Low Energy / Passive) — re-generates suggestions on change
-- [ ] Progress bars for weekly goal minutes in dashboard sidebar
+- [ ] Goals router: trigger LLM task generation on goal create/update (BackgroundTasks)
 - [ ] Spotify integration (stretch)
 
 ---
@@ -231,4 +285,10 @@ npm run dev   # port 3000
 | 2026-03-14 | 3b | GOOGLE_CLIENT_ID was full JSON blob in .env | ✅ fixed | replaced with just the client ID string |
 | 2026-03-14 | 3b | GCal write-back failed on expired token | ✅ fixed | added creds.refresh(Request()) in feedback.py |
 | 2026-03-14 | 3b | AuthCallback always redirected to wrong route | ✅ fixed | checks goals to route new vs returning users |
-| 2026-03-14 | 4 | suggestions.py: date.today() shadowed by `date` param | ⚠️ watch | renamed query param to avoid collision |
+| 2026-03-14 | 4 | suggestions.py: date.today() shadowed by `date` param | ✅ fixed | renamed import to `date as date_type` |
+| 2026-03-14 | 4 | SQLite missing daily_limit/llm_generated columns — app crash on start | ✅ fixed | _migrate() in database.py runs ALTER TABLE safely on startup |
+| 2026-03-14 | 5 | Accept didn't hide other suggestions for same time block | ✅ fixed | feedback.py auto-rejects siblings on accept |
+| 2026-03-14 | 5 | 3 suggestion blocks stacked at same pixel position | ✅ fixed | WeekView deduplicates per time_block_id |
+| 2026-03-14 | 5 | Same task suggested repeatedly filling entire day | ✅ fixed | daily_limit + weekly_limit enforced in engine |
+| 2026-03-14 | 5 | Large free blocks not split into varied tasks | ✅ fixed | >90 min gaps subdivided into 60-min chunks in suggestions.py |
+| 2026-03-14 | 5c | Expired/invalid Google tokens produced silent empty sync results | ✅ fixed | events router now returns explicit 401/502 and calendar service no longer swallows auth/API errors |

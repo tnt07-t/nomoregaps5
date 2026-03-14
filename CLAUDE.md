@@ -1,15 +1,20 @@
-# CLAUDE.md — AI Dead-Time Optimizer (Hackathon Build)
+# CLAUDE.md — NoMoreGaps (Hackathon Build)
+
+> **READ THIS BEFORE EVERY BUILD PHASE. UPDATE AFTER EVERY PHASE.**
+> Full history in BUILD_LOG.md.
+
+---
 
 ## Project Overview
-A calendar-based web app that reads Google Calendar events, detects fragmented free time blocks, and suggests context-aware tasks as dashed tentative blocks on a visual calendar UI. Users accept/reject suggestions. The system learns from feedback.
+Calendar-based web app that reads Google Calendar, detects fragmented free time blocks, and suggests context-aware tasks as dashed tentative blocks. Users accept/reject. Accepted tasks write back to GCal. System learns from feedback and re-scores tasks via LLM on each sync.
 
 ## Stack
-- **Frontend**: React + Tailwind CSS (Vite, port 3000)
+- **Frontend**: React + Tailwind CSS v3 (Vite, port 3000)
 - **Backend**: FastAPI (Python 3.11), port 8000
-- **DB**: SQLite (hackathon speed) via SQLAlchemy
-- **Auth**: Google OAuth 2.0 (mock mode for dev, real OAuth ready)
-- **LLM**: claude-sonnet-4-20250514 via Anthropic API (with rule-based fallback)
-- **Integrations**: Google Calendar API (USE_MOCK_DATA=true for dev)
+- **DB**: SQLite via SQLAlchemy (`focusfill/backend/nomoregaps.db`)
+- **Auth**: Google OAuth 2.0 (real mode; `USE_MOCK_DATA=false`)
+- **LLM**: Anthropic API — `claude-sonnet-4-20250514` for task gen, `claude-haiku-4-5-20251001` for explanations + re-scoring
+- **Integrations**: Google Calendar API (read + write)
 
 ## Running the App
 
@@ -18,7 +23,6 @@ A calendar-based web app that reads Google Calendar events, detects fragmented f
 cd focusfill/backend
 source venv/bin/activate   # Python 3.11 venv — DO NOT use system python3 (3.14)
 uvicorn main:app --reload --port 8000
-# OR: ./start.sh
 ```
 
 ### Frontend
@@ -27,97 +31,91 @@ cd focusfill/frontend
 npm run dev   # runs on http://localhost:3000
 ```
 
-## Switching to Real Google Calendar
-1. Set up Google Cloud project → enable Calendar API → create OAuth credentials
-2. Edit `focusfill/backend/.env`:
-   ```
-   USE_MOCK_DATA=false
-   GOOGLE_CLIENT_ID=your_client_id
-   GOOGLE_CLIENT_SECRET=your_client_secret
-   GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
-   ```
-3. Visit `http://localhost:8000/auth/google` to start OAuth flow
-4. After login, user is redirected to `http://localhost:3000?user_id=<id>`
-
 ## Core Entities
-User, UserPreference, CalendarEvent, TimeBlock, Task, Suggestion, FeedbackEvent
+User, UserPreference, Goal, GoalTask, CalendarEvent, TimeBlock, Task, Suggestion, FeedbackEvent
 
 ## Key Design Rules
-- Matching/ranking is DETERMINISTIC (rule-based scoring formula)
-- LLM is called ONLY for: (1) suggestion explanation text (with fallback)
-- Cache LLM outputs per event (don't re-call if already processed)
-- Only fetch/process events within next 7 days
+- Matching/ranking is DETERMINISTIC (rule-based scoring formula + LLM priority_boost)
+- LLM called for: (1) task generation on goal create/update, (2) re-prioritization on each sync, (3) explanation strings (optional, with fallback)
+- DB migrations run automatically on startup via `database._migrate()` — safe to add new ALTER TABLE statements there
+- Only fetch/process events within current 7-day week
 - Suggestions appear as dashed blocks; accepted = solid; rejected = hidden
+- **Only 1 suggestion shown per time_block** (WeekView deduplicates by time_block_id)
+- Accepting a suggestion auto-rejects all sibling suggestions for the same time_block
+- Large gaps (>90 min) are subdivided into 60-min sub-blocks in suggestions.py
 - Backend uses Python 3.11 venv (Python 3.14 breaks pydantic v1)
+- `from __future__ import annotations` required in Python 3.11 files using `X | Y` union types
 
 ## Scoring Formula
 ```
 total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
-            + 15*event_relevance + 10*low_setup_bonus + 10*historical_acceptance_bonus
+            + 15*event_relevance + 10*low_setup_bonus + 10*historical_acceptance
             - 20*mobility_mismatch - 25*location_mismatch
+            + priority_boost * 30   ← set by LLM on each sync
 ```
 
+## Task Limits
+- **daily_limit**: max times a task is suggested per day (stored on Task + GoalTask)
+- **weekly_limit**: max times a task is suggested per week (stored on Task + GoalTask)
+- Enforced in `suggestion_engine.get_top_suggestions()` via `daily_usage` + `weekly_usage` dicts
+- `session_usage` dict prevents over-assignment within a single generation call
+- Seed task examples: "Reply to Emails" → daily=1, weekly=5; "Chess Tactics" → daily=2, weekly=14
+
+## LLM Usage (cost-controlled)
+| Function | Model | Trigger | Output |
+|----------|-------|---------|--------|
+| `generate_tasks_for_goal()` | sonnet | goal create/update | 4 tasks with daily_limit |
+| `reprioritize_tasks()` | haiku | every GCal sync | `{task_id: boost}` (-0.3 to +0.3) |
+| `generate_explanation()` | haiku | on demand | 1-sentence reason string |
+
 ## API Endpoints
-- POST /auth/mock-login         → login as demo user (mock mode)
-- GET  /auth/google             → start Google OAuth (real mode)
-- GET  /auth/me?user_id=N       → user + preferences
-- POST /events/sync?user_id=N   → fetch+store events from Google/mock
-- GET  /events/?user_id=N       → get stored events for week
-- POST /suggestions/generate    → run suggestion pipeline for a date
-- GET  /suggestions/?user_id=N  → get stored suggestions
-- POST /feedback/               → accept or reject a suggestion
-- GET  /preferences/?user_id=N  → get user preferences
-- PUT  /preferences/?user_id=N  → update preferences
+- POST `/auth/mock-login` → login as demo user (mock mode)
+- GET  `/auth/google` → start Google OAuth
+- GET  `/auth/me?user_id=N` → user + preferences
+- POST `/events/sync?user_id=N&force=bool` → fetch+store events (throttled 6h); triggers LLM reprioritize
+- GET  `/events/?user_id=N` → stored events for week
+- POST `/suggestions/generate?user_id=N` → gap detect → subdivide → score → store top-3 per block
+- GET  `/suggestions/?user_id=N` → week's pending+accepted suggestions
+- POST `/feedback/` → accept (auto-rejects siblings, writes to GCal) or reject
+- GET/POST/PUT `/goals/` → CRUD + LLM task gen in background
+- GET/PUT `/preferences/` → user preferences
 
-## Sync & Write-back Behavior
-- GCal sync throttled to once per 6 hours (SYNC_COOLDOWN_HOURS in events.py)
-- Manual "Sync" button in UI always forces a remote fetch (force=true)
-- Accepting a suggestion writes it to Google Calendar (real mode) or logs a mock ID (mock mode)
-- `users.last_synced_at` tracks when the last remote fetch happened
-- `suggestions.gcal_event_id` stores the GCal event ID written on accept
+## Sync & Write-back
+- GCal sync throttled 6h (SYNC_COOLDOWN_HOURS); force=true bypasses
+- Sync now validates/refreshes OAuth tokens before GCal fetch
+- Expired or invalid OAuth now returns explicit `401` (reconnect required), not silent empty data
+- Non-auth Google Calendar API failures return `502` from `/events/sync`
+- Accept → writes to GCal with `colorId: "2"` (sage green); token refresh handled automatically
+- `users.last_synced_at` tracks last remote fetch
+- `suggestions.gcal_event_id` stores written GCal event ID
 
-## Known Errors & Decisions Log
-- Python 3.14 breaks pydantic v1 — must use Python 3.11 venv at /opt/homebrew/bin/python3.11
-- Tailwind v4 does not work with postcss config format from v3 — downgraded to v3 in package.json
+## Known Gotchas
+- `date` query param in suggestions.py shadowed `datetime.date` → renamed import to `date as date_type`
+- Python 3.14 breaks pydantic v1 — must use venv at `/opt/homebrew/bin/python3.11`
+- Tailwind v4 breaks with v3 postcss config — stay on v3
+- `App.jsx` should be edited with Edit tool, not Write (linter may revert Write)
+- After any models.py change: add migration SQL to `database._migrate()` or server won't start
+- If `/events/sync` returns `401`, user must re-run Google OAuth (`/auth/google`) to restore tokens
 
 ## What Has Been Built
-✅ Folder structure scaffolded
-✅ DB models defined (User, UserPreference, CalendarEvent, TimeBlock, Task, Suggestion, FeedbackEvent)
-✅ Mock auth (/auth/mock-login) + Google OAuth code ready (gated by USE_MOCK_DATA)
-✅ Calendar event fetch (mock: 11 events for demo week; real: Google Calendar API)
-✅ TimeBlock detection algorithm (detects gaps ≥10 min within 8AM–10PM window)
-✅ Seed tasks (12 tasks covering all categories + constraint fields)
-✅ Scoring + matching engine (deterministic formula, all 8 score components)
-✅ Suggestion generation endpoint (generates + stores top-3 per time block)
-✅ Suggestion retrieval endpoint
-✅ Accept/Reject feedback endpoint + FeedbackEvent stored
-✅ LLM reason string generation (with rule-based fallback)
-✅ React frontend scaffolded (Vite + Tailwind v3)
-✅ WeekView calendar component (Mon–Sun, time axis)
-✅ EventBlock component (solid colored blocks by event type)
-✅ SuggestionBlock component (dashed border, animated)
-✅ SuggestionCard detail panel (task info + accept/reject buttons)
-✅ TopBar with week nav + sync button + mode selector
-✅ Sidebar with goals + scheduled tasks + category list
-✅ ModeSelector (Productive / Low Energy / Passive)
-✅ useCalendar hook (sync + fetch events)
-✅ useSuggestions hook (generate per day + feedback)
+✅ Full onboarding flow (4 steps matching PDF mockups)
+✅ Google OAuth 2.0 (real mode, token refresh on expiry)
+✅ Calendar event sync (GCal API, 6h throttle, force sync button)
+✅ Gap detection (≥15 min, 8AM–10PM, transition buffers)
+✅ Block subdivision (>90 min gaps → 60-min chunks for varied tasks)
+✅ 12 seed tasks with daily + weekly limits
+✅ Scoring engine (deterministic formula + LLM priority_boost)
+✅ Suggestion generation (top-3 per block, stored in DB)
+✅ Accept/Reject flow (sibling auto-reject, GCal write-back)
+✅ Weekly + daily limit enforcement in suggestion engine
+✅ LLM task generation on goal create/update (BackgroundTasks)
+✅ LLM re-prioritization on every GCal sync (Haiku, cost-minimal)
+✅ React week-view calendar (dashed = pending, solid = accepted, hidden = rejected)
+✅ 1 suggestion per time block in UI (no overlapping blocks)
+✅ Goal management page (/goals)
+✅ Dashboard: mini-calendar, goals progress sidebar, week nav, sync button
 
-## Build Order (Priority)
-- [x] CLAUDE.md created and initialized
-- [x] Folder structure scaffolded
-- [x] DB models defined
-- [x] Google OAuth flow working (mock + real)
-- [x] Calendar event fetch (7-day window)
-- [x] TimeBlock detection algorithm
-- [x] Task seed data (12 realistic tasks)
-- [x] Scoring + matching engine
-- [x] Suggestion generation endpoint
-- [x] Suggestion storage + retrieval
-- [x] React calendar week view
-- [x] Dashed suggestion blocks rendering
-- [x] Accept/Reject UI + feedback endpoint
-- [x] LLM reason string generation
-- [ ] User preference/goals edit page (UI form)
-- [ ] Mode selector affects suggestions in real-time (needs re-generate on change)
+## Remaining / Stretch
+- [ ] Mode selector (Productive / Low Energy / Passive) → re-generate suggestions on change
+- [ ] Goals router: wire BackgroundTasks LLM call on goal create/update (partially done)
 - [ ] Spotify integration (stretch)

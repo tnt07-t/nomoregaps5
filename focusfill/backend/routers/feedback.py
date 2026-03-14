@@ -42,13 +42,20 @@ def submit_feedback(body: schemas.FeedbackCreate, db: Session = Depends(get_db))
     suggestion.status = body.action
 
     if body.action == "accepted":
+        # Reject all other pending suggestions for the same time block
+        siblings = db.query(models.Suggestion).filter(
+            models.Suggestion.time_block_id == suggestion.time_block_id,
+            models.Suggestion.id != suggestion.id,
+            models.Suggestion.status == "pending",
+        ).all()
+        for sib in siblings:
+            sib.status = "rejected"
+
         if USE_MOCK_DATA:
-            # Mock write-back: generate a fake gcal event id
             mock_id = f"mock_gcal_{uuid.uuid4().hex[:12]}"
             suggestion.gcal_event_id = mock_id
             print(f"[feedback] Mock GCal write-back: event_id={mock_id}")
         else:
-            # Real mode: write to Google Calendar
             gcal_id = _write_to_gcal(suggestion, db)
             if gcal_id:
                 suggestion.gcal_event_id = gcal_id

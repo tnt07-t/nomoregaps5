@@ -121,6 +121,65 @@ def generate_explanation(task_title: str, gap_duration: int,
         return ""
 
 
+def reprioritize_tasks(user_goals: list, tasks: list, feedback_history: list) -> dict:
+    """
+    Ask Claude to re-score tasks based on user goals and acceptance patterns.
+    Returns {task_id: priority_boost} where boost is in range -0.3 to +0.3.
+    Called once per GCal sync to keep suggestions fresh and relevant.
+    """
+    if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY.startswith("your_"):
+        return {}
+
+    goals_summary = ", ".join(
+        [f"{getattr(g, 'title', '')} ({getattr(g, 'category', '')})" for g in user_goals]
+    ) or "none set"
+
+    task_info = [{"id": getattr(t, "id", 0), "title": getattr(t, "title", ""), "category": getattr(t, "category", "")}
+                 for t in tasks[:20]]
+
+    # Build acceptance rates per task
+    acceptance: dict = {}
+    for fb in feedback_history:
+        sugg = getattr(fb, "suggestion", None)
+        task_id = getattr(sugg, "task_id", None) if sugg else None
+        if task_id is None:
+            continue
+        if task_id not in acceptance:
+            acceptance[task_id] = {"a": 0, "r": 0}
+        if getattr(fb, "action", "") == "accepted":
+            acceptance[task_id]["a"] += 1
+        else:
+            acceptance[task_id]["r"] += 1
+
+    prompt = (
+        f"User goals: {goals_summary}\n"
+        f"Tasks: {json.dumps(task_info)}\n"
+        f"Acceptance history (task_id -> {{a: accepted, r: rejected}}): {json.dumps(acceptance)}\n\n"
+        "Return a JSON object mapping task IDs (as strings) to priority boost values (-0.3 to +0.3). "
+        "Boost tasks that align well with the goals and have high acceptance. "
+        "Penalize tasks the user repeatedly rejects. "
+        "Return ONLY JSON, no explanation: {\"1\": 0.2, \"3\": -0.1}"
+    )
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = message.content[0].text.strip()
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not match:
+            return {}
+        boosts = json.loads(match.group())
+        return {int(k): max(-0.3, min(0.3, float(v))) for k, v in boosts.items()}
+    except Exception as exc:
+        print(f"[llm_service] reprioritize error: {exc}")
+        return {}
+
+
 # ─── Rule-based fallback ──────────────────────────────────────────────────────
 
 _FALLBACK_BY_CATEGORY = {
