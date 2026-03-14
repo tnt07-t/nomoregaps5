@@ -5,8 +5,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from database import create_tables
+from database import create_tables, SessionLocal
 from routers import auth, preferences, goals, events, suggestions, feedback
+from seed_tasks import seed_tasks
 
 app = FastAPI(
     title="TimeFiller API",
@@ -40,6 +41,11 @@ app.include_router(feedback.router)
 @app.on_event("startup")
 def startup():
     create_tables()
+    db = SessionLocal()
+    try:
+        seed_tasks(db)
+    finally:
+        db.close()
 
 
 @app.get("/")

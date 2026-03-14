@@ -5,7 +5,7 @@
 ---
 
 ## Current Status
-**Phase:** 1 — Onboarding Flow ✅ COMPLETE
+**Phase:** 2 — Calendar View + Suggestion Engine ✅ COMPLETE
 **Last updated:** 2026-03-14
 **Backend:** Running on http://localhost:8000
 **Frontend:** Running on http://localhost:3000
@@ -85,20 +85,55 @@
 
 ---
 
-## Phase 2 — Calendar View + Event Rendering (PLANNED)
+### Phase 2 — Calendar View + Suggestion Engine (2026-03-14)
+**Goal:** Build calendar grid, gap detection, suggestion engine, feedback loop, and full dashboard.
+
+#### Files Created
+**Backend (focusfill/backend/)**
+- `services/calendar_service.py` — mock 11-event week + real Google Calendar API wrapper
+- `services/gap_detector.py` — detects free gaps (≥15 min, 8AM–10PM, with transition buffers)
+- `services/suggestion_engine.py` — deterministic scoring formula, rule-based reason strings
+- `seed_tasks.py` — 12 default tasks seeded on startup if table empty
+- `routers/events.py` — fully implemented (sync throttled 6h, upsert by gcal_event_id)
+- `routers/suggestions.py` — fully implemented (gap detect → time blocks → score → store top-3)
+- `routers/feedback.py` — fully implemented (accept/reject, mock gcal write-back)
+- `main.py` — updated to call `seed_tasks(db)` on startup
+
+**Frontend (focusfill/frontend/src/)**
+- `hooks/useCalendar.js` — sync, generateSuggestions, acceptSuggestion, rejectSuggestion
+- `components/calendar/WeekView.jsx` — Mon–Sun grid, time axis 6AM–10PM, now-indicator
+- `components/calendar/EventBlock.jsx` — solid colored blocks by event_type
+- `components/calendar/SuggestionBlock.jsx` — dashed animated blocks, hover accept/reject
+- `components/RightPanel.jsx` — contextual detail panel (empty/suggestion/event states)
+- `components/EditSuggestionModal.jsx` — edit title + duration modal
+- `components/RescheduleModal.jsx` — pick alternate time slot modal
+- `pages/Dashboard.jsx` — complete rewrite: 3-column layout, mini-calendar, goals sidebar,
+  week nav, sync button, suggestions toggle, full data flow
+
+#### Build Results
+- ✅ `python -c "from main import app"` passes — 0 errors
+- ✅ `npm run build` passes — 53 modules, 0 errors
+- ✅ Bundle: 218 kB JS / 26 kB CSS
+- ✅ LIVE TEST: `POST /events/sync?user_id=1&force=true` → 11 mock events stored
+- ✅ LIVE TEST: `GET /events/?user_id=1` → 11 events returned
+- ✅ LIVE TEST: `POST /suggestions/generate?user_id=1` → 51 suggestions generated + scored
+- ✅ LIVE TEST: `GET /suggestions/?user_id=1` → 51 returned with task + time_block nested
+- ✅ LIVE TEST: `POST /feedback/` accept → status=accepted, mock gcal_event_id assigned, reason string generated
+
+#### Known Warnings (non-blocking)
+- ⚠️ `datetime.utcnow()` deprecation hint — Python 3.11 venv unaffected
+- ⚠️ postcss.config.js module type warning — cosmetic only
+
+#### Google OAuth Status
+- ✅ Backend fully implemented in `routers/auth.py`
+- ✅ `GET /auth/google` → redirects to Google consent (real mode)
+- ✅ `GET /auth/google/callback` → exchanges code, upserts user, redirects to frontend
+- 🔧 To activate real OAuth: set `USE_MOCK_DATA=false` + add `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` to `.env`
+
+---
+
+## Phase 2 (old stub — replaced above) — Calendar View + Event Rendering
 **Goal:** Build the main dashboard week view with real/mock Google Calendar events.
-
-**TODO:**
-- [ ] Implement `routers/events.py` fully (Google Calendar sync + mock fallback)
-- [ ] Implement `services/calendar_service.py` (Google API client + mock data)
-- [ ] Build `WeekView` React component (Mon–Sun, time axis 8am–10pm)
-- [ ] Build `EventBlock` component (solid colored blocks by event type)
-- [ ] Implement `useCalendar` hook (sync + fetch)
-- [ ] Wire Dashboard.jsx to show real week view
-
-**Risks:**
-- Google OAuth scope needs `calendar.readonly` + `calendar.events` — test early
-- Time zone handling must use user's detected timezone from Google
 
 ---
 

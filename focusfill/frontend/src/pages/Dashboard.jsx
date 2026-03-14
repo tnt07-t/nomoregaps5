@@ -1,146 +1,456 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { useCalendar } from '../hooks/useCalendar'
 import { api } from '../utils/api'
-import BrandHeader from '../components/BrandHeader'
+import WeekView from '../components/calendar/WeekView'
+import RightPanel from '../components/RightPanel'
+import EditSuggestionModal from '../components/EditSuggestionModal'
+import RescheduleModal from '../components/RescheduleModal'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const CATEGORY_COLORS = {
+  Career:      { bar: '#3B82F6', badge: 'bg-blue-100 text-blue-700' },
+  Learning:    { bar: '#22C55E', badge: 'bg-green-100 text-green-700' },
+  Health:      { bar: '#F97316', badge: 'bg-orange-100 text-orange-700' },
+  'Life Admin':{ bar: '#A855F7', badge: 'bg-purple-100 text-purple-700' },
+}
+
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+// ─── Helper functions ─────────────────────────────────────────────────────────
+
+function getMonday(date) {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function addDays(date, n) {
+  const d = new Date(date)
+  d.setDate(d.getDate() + n)
+  return d
+}
+
+function fmtMonthDay(date) {
+  return `${MONTHS[date.getMonth()].slice(0, 3)} ${date.getDate()}`
+}
+
+function isSameDay(a, b) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth()    === b.getMonth() &&
+    a.getDate()     === b.getDate()
+  )
+}
+
+function isToday(date) {
+  return isSameDay(date, new Date())
+}
+
+// Calculate scheduled minutes per goal from accepted suggestions
+function calcScheduledMinutes(suggestions, goals) {
+  const map = {}
+  goals.forEach(g => { map[g.id] = 0 })
+  suggestions.forEach(s => {
+    if (s.status !== 'accepted') return
+    const task = s.task
+    const block = s.time_block
+    if (!task || !block) return
+    // Match task category to goal
+    goals.forEach(g => {
+      if (g.category === task.category) {
+        map[g.id] = (map[g.id] || 0) + (block.duration_minutes || 0)
+      }
+    })
+  })
+  return map
+}
+
+// ─── Mini Month Calendar ──────────────────────────────────────────────────────
+
+function MiniMonthCalendar({ weekStart }) {
+  const [viewDate, setViewDate] = useState(new Date())
+  const today = new Date()
+
+  const year  = viewDate.getFullYear()
+  const month = viewDate.getMonth()
+
+  // First day of the month
+  const firstDay = new Date(year, month, 1)
+  const startDow = firstDay.getDay() // 0=Sun
+  // Pad so Monday is first column
+  const startOffset = startDow === 0 ? 6 : startDow - 1
+
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells = []
+  for (let i = 0; i < startOffset; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d))
+
+  const weekEnd = addDays(weekStart, 6)
+
+  function inCurrentWeek(date) {
+    if (!date) return false
+    const t = date.getTime()
+    return t >= weekStart.getTime() && t <= weekEnd.getTime()
+  }
+
+  return (
+    <div className="select-none">
+      {/* Month nav */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-stone-700">
+          {MONTHS[month].slice(0, 3)} {year}
+        </span>
+        <div className="flex gap-1">
+          <button
+            className="w-5 h-5 rounded flex items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-100 text-xs"
+            onClick={() => setViewDate(new Date(year, month - 1, 1))}
+          >‹</button>
+          <button
+            className="w-5 h-5 rounded flex items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-100 text-xs"
+            onClick={() => setViewDate(new Date(year, month + 1, 1))}
+          >›</button>
+        </div>
+      </div>
+
+      {/* Day-of-week headers */}
+      <div className="grid grid-cols-7 mb-1">
+        {['M','T','W','T','F','S','S'].map((d, i) => (
+          <div key={i} className="text-center text-xs text-stone-400 font-medium py-0.5">{d}</div>
+        ))}
+      </div>
+
+      {/* Date cells */}
+      <div className="grid grid-cols-7 gap-y-0.5">
+        {cells.map((date, i) => (
+          <div
+            key={i}
+            className={`text-center text-xs rounded py-0.5 leading-5
+              ${!date ? '' : inCurrentWeek(date) ? 'bg-stone-100' : ''}
+              ${date && isToday(date) ? 'bg-stone-800 text-white rounded-full font-bold' : date ? 'text-stone-600' : ''}
+            `}
+          >
+            {date ? date.getDate() : ''}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { userId, userName, login, logout } = useAuth()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true)
 
-  // Handle user_id from URL (e.g. after OAuth)
+  // Auth from URL
   useEffect(() => {
     const userIdParam = searchParams.get('user_id')
-    if (userIdParam && !userId) {
-      login({ user_id: userIdParam })
-    }
+    if (userIdParam && !userId) login({ user_id: userIdParam })
   }, [searchParams])
 
-  // Load user info
+  // Redirect if not logged in
+  useEffect(() => {
+    if (userId === null) {
+      // Wait briefly to allow storage read
+      const t = setTimeout(() => {
+        const stored = localStorage.getItem('timefiller_user_id')
+        if (!stored) navigate('/')
+      }, 200)
+      return () => clearTimeout(t)
+    }
+  }, [userId, navigate])
+
+  // Calendar state
+  const { events, suggestions, loading, sync, generateSuggestions, fetchSuggestions,
+          acceptSuggestion, rejectSuggestion } = useCalendar(userId)
+
+  // Goals
+  const [goals, setGoals] = useState([])
+
+  // Week navigation
+  const [weekOffset, setWeekOffset] = useState(0)
+  const weekStart = useMemo(() => {
+    const base = getMonday(new Date())
+    return addDays(base, weekOffset * 7)
+  }, [weekOffset])
+  const weekEnd = addDays(weekStart, 6)
+
+  // Selection state
+  const [selectedId,   setSelectedId]   = useState(null)
+  const [selectedType, setSelectedType] = useState(null) // 'event' | 'suggestion'
+  const [showSuggestions, setShowSuggestions] = useState(true)
+
+  // Modals
+  const [editTarget,       setEditTarget]       = useState(null)
+  const [rescheduleTarget, setRescheduleTarget] = useState(null)
+
+  // Syncing flag (prevent double-sync on mount)
+  const [synced, setSynced] = useState(false)
+
+  // On mount: sync + generate
+  useEffect(() => {
+    if (!userId || synced) return
+    setSynced(true)
+    ;(async () => {
+      try {
+        await sync(false)
+        await generateSuggestions()
+      } catch (err) {
+        console.error('[Dashboard] initial load error:', err)
+      }
+    })()
+  }, [userId, synced])
+
+  // Load goals
   useEffect(() => {
     if (!userId) return
-    api.getMe(userId)
-      .then((data) => {
-        setUser(data.user)
-        if (data.user.name) {
-          login({ user_id: userId, name: data.user.name, email: data.user.email })
-        }
-      })
+    api.getGoals(userId)
+      .then(data => setGoals(Array.isArray(data) ? data : []))
       .catch(() => {})
-      .finally(() => setLoading(false))
   }, [userId])
 
-  const displayName = user?.name || userName || 'there'
-  const firstName = displayName.split(' ')[0]
+  // Derived: selected object
+  const selectedObject = useMemo(() => {
+    if (!selectedId) return null
+    if (selectedType === 'event')      return events.find(e => e.id === selectedId) || null
+    if (selectedType === 'suggestion') return suggestions.find(s => s.id === selectedId) || null
+    return null
+  }, [selectedId, selectedType, events, suggestions])
+
+  // Scheduled minutes per goal
+  const scheduledMinutes = useMemo(() => calcScheduledMinutes(suggestions, goals), [suggestions, goals])
+
+  // Handlers
+  function handleSelectEvent(ev) {
+    setSelectedId(ev.id)
+    setSelectedType('event')
+  }
+
+  function handleSelectSuggestion(s) {
+    setSelectedId(s.id)
+    setSelectedType('suggestion')
+  }
+
+  async function handleAccept(suggestionId) {
+    await acceptSuggestion(suggestionId)
+    // Update selected if it's this one
+    if (selectedId === suggestionId) {
+      setSelectedId(suggestionId) // keep selected to show accepted state
+    }
+  }
+
+  async function handleReject(suggestionId) {
+    await rejectSuggestion(suggestionId)
+    if (selectedId === suggestionId) {
+      setSelectedId(null)
+      setSelectedType(null)
+    }
+  }
+
+  function handleReschedule(suggestion) {
+    setRescheduleTarget(suggestion)
+  }
+
+  function handleEditSave({ title, duration_minutes }) {
+    // In a real app, PATCH the suggestion; here we just log
+    console.log('[Dashboard] Edit saved:', { title, duration_minutes })
+  }
+
+  function handleForceSync() {
+    sync(true).then(() => generateSuggestions())
+  }
 
   return (
-    <div
-      className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden"
-      style={{ backgroundColor: '#F4EFE6' }}
-    >
-      {/* Decorative circles */}
-      <div
-        className="absolute -left-32 top-1/3 w-96 h-96 rounded-full opacity-40 blur-3xl pointer-events-none"
-        style={{ backgroundColor: '#D6CFC4' }}
-      />
-      <div
-        className="absolute -right-20 bottom-20 w-72 h-72 rounded-full opacity-30 blur-3xl pointer-events-none"
-        style={{ backgroundColor: '#C8BFB0' }}
-      />
+    <div className="flex flex-col h-screen bg-white overflow-hidden font-sans">
+      {/* ── Top Bar ──────────────────────────────────────────────────────────── */}
+      <header className="flex-shrink-0 flex items-center justify-between h-14 px-4 border-b border-stone-200 bg-white z-30">
+        {/* Brand */}
+        <span className="font-serif text-lg text-stone-800 font-bold select-none">TimeFiller</span>
 
-      <div className="relative z-10 w-full max-w-lg mx-4">
-        <div className="bg-white rounded-2xl shadow-sm border border-stone-100 px-10 py-12 text-center">
-          <BrandHeader />
-
-          {loading ? (
-            <div className="flex justify-center py-8">
-              <svg className="w-6 h-6 animate-spin text-stone-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            </div>
-          ) : (
-            <>
-              <div className="mb-8">
-                <div
-                  className="inline-flex items-center justify-center w-14 h-14 rounded-full text-white text-xl font-bold mb-4"
-                  style={{ backgroundColor: '#6B8F71' }}
-                >
-                  {firstName.charAt(0).toUpperCase()}
-                </div>
-                <h2 className="font-serif text-2xl text-stone-800 mb-2">
-                  Welcome, {firstName}!
-                </h2>
-                <p className="text-sm text-stone-500">
-                  Your onboarding is complete. The full calendar dashboard is coming soon.
-                </p>
-              </div>
-
-              <div
-                className="rounded-xl p-5 mb-6 text-left border"
-                style={{ backgroundColor: '#F8F6F3', borderColor: '#E7E5E4' }}
-              >
-                <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-3">
-                  What happens next
-                </p>
-                <ul className="space-y-3">
-                  {[
-                    { label: 'Sync your Google Calendar', done: false },
-                    { label: 'Detect free time blocks', done: false },
-                    { label: 'Generate task suggestions', done: false },
-                    { label: 'Accept or reject to learn your preferences', done: false },
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <div
-                        className="mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center"
-                        style={{ borderColor: item.done ? '#6B8F71' : '#D6D3D1', backgroundColor: item.done ? '#6B8F71' : 'transparent' }}
-                      >
-                        {item.done && (
-                          <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </div>
-                      <span className="text-sm text-stone-600">{item.label}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <button
-                  className="w-full rounded-xl px-6 py-4 text-sm font-semibold text-white transition-colors"
-                  style={{ backgroundColor: '#3D3530' }}
-                  onMouseEnter={(e) => { e.target.style.backgroundColor = '#2D2520' }}
-                  onMouseLeave={(e) => { e.target.style.backgroundColor = '#3D3530' }}
-                  onClick={() => alert('Calendar sync coming soon!')}
-                >
-                  Sync Google Calendar
-                </button>
-
-                <button
-                  onClick={() => {
-                    logout()
-                    navigate('/')
-                  }}
-                  className="w-full border border-stone-200 rounded-xl px-6 py-3 text-sm text-stone-500 hover:bg-stone-50 transition-colors"
-                >
-                  Sign out
-                </button>
-              </div>
-            </>
-          )}
+        {/* Week nav */}
+        <div className="flex items-center gap-2">
+          <button
+            className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-stone-100 text-stone-500 hover:text-stone-800 transition-colors"
+            onClick={() => setWeekOffset(o => o - 1)}
+          >‹</button>
+          <span className="text-sm font-medium text-stone-700 w-36 text-center">
+            {fmtMonthDay(weekStart)} – {fmtMonthDay(weekEnd)}
+          </span>
+          <button
+            className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-stone-100 text-stone-500 hover:text-stone-800 transition-colors"
+            onClick={() => setWeekOffset(o => o + 1)}
+          >›</button>
+          <button
+            className="ml-2 px-3 py-1 rounded-full text-xs font-semibold border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors"
+            onClick={() => setWeekOffset(0)}
+          >Today</button>
         </div>
 
-        <p className="text-center text-xs text-stone-400 mt-4">
-          <a href="#" className="hover:text-stone-600 transition-colors">Privacy Policy</a>
-          <span className="mx-2">•</span>
-          <a href="#" className="hover:text-stone-600 transition-colors">Terms of Service</a>
-        </p>
+        {/* Right actions */}
+        <div className="flex items-center gap-3">
+          {/* Sync button */}
+          <button
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors
+              ${loading ? 'border-stone-200 text-stone-400' : 'border-stone-300 text-stone-600 hover:bg-stone-50'}
+            `}
+            onClick={handleForceSync}
+            disabled={loading}
+          >
+            {loading ? '⟳ Syncing…' : '⟳ Sync'}
+          </button>
+
+          {/* Suggestions toggle */}
+          <button
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors
+              ${showSuggestions
+                ? 'bg-green-600 border-green-600 text-white hover:bg-green-700'
+                : 'border-stone-200 text-stone-600 hover:bg-stone-50'
+              }
+            `}
+            onClick={() => setShowSuggestions(v => !v)}
+          >
+            <span>{showSuggestions ? '◉' : '○'}</span>
+            Show Suggestions
+          </button>
+
+          {/* Avatar */}
+          <div className="w-8 h-8 rounded-full bg-stone-200 flex items-center justify-center text-sm font-bold text-stone-600 select-none cursor-pointer"
+            title={userName || 'User'}
+            onClick={() => { logout(); navigate('/') }}
+          >
+            {(userName || 'U').charAt(0).toUpperCase()}
+          </div>
+        </div>
+      </header>
+
+      {/* ── Main layout ──────────────────────────────────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* ── Left Sidebar ─────────────────────────────────────────────────── */}
+        <aside className="flex-shrink-0 w-52 border-r border-stone-200 flex flex-col overflow-y-auto"
+          style={{ backgroundColor: '#F9F8F6' }}>
+
+          <div className="p-3 pt-4">
+            {/* Mini month calendar */}
+            <MiniMonthCalendar weekStart={weekStart} />
+
+            {/* Goals section */}
+            <div className="mt-5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-stone-600 uppercase tracking-wide">Goals</span>
+                <button className="text-stone-400 hover:text-stone-600 text-lg leading-none w-5 h-5 flex items-center justify-center">+</button>
+              </div>
+
+              {goals.length === 0 ? (
+                <p className="text-xs text-stone-400 italic">No goals yet</p>
+              ) : (
+                <div className="space-y-3">
+                  {goals.map(goal => {
+                    const scheduled = scheduledMinutes[goal.id] || 0
+                    const target    = goal.weekly_target_minutes || 60
+                    const pct       = Math.min(100, Math.round((scheduled / target) * 100))
+                    const color     = CATEGORY_COLORS[goal.category]?.bar || '#94A3B8'
+                    return (
+                      <div key={goal.id}>
+                        <div className="flex justify-between items-baseline mb-0.5">
+                          <span className="text-xs text-stone-700 font-medium truncate max-w-[110px]">{goal.title}</span>
+                          <span className="text-xs text-stone-400 ml-1 flex-shrink-0">
+                            {Math.round(scheduled / 60 * 10) / 10}/{Math.round(target / 60 * 10) / 10}h
+                          </span>
+                        </div>
+                        <div className="h-1 bg-stone-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{ width: `${pct}%`, backgroundColor: color }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bottom integrations */}
+          <div className="mt-auto p-3 border-t border-stone-200 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs text-stone-500">
+              <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0"></span>
+              Google Calendar: Connected
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-stone-400 cursor-pointer hover:text-stone-600">
+              <span className="text-stone-300">♪</span>
+              Spotify: Connect
+            </div>
+          </div>
+        </aside>
+
+        {/* ── Calendar grid ─────────────────────────────────────────────────── */}
+        <main className="flex-1 flex flex-col overflow-hidden bg-white">
+          <WeekView
+            events={events}
+            suggestions={suggestions}
+            selectedId={selectedId}
+            selectedType={selectedType}
+            onSelectEvent={handleSelectEvent}
+            onSelectSuggestion={handleSelectSuggestion}
+            onAccept={handleAccept}
+            onReject={handleReject}
+            weekStart={weekStart}
+            showSuggestions={showSuggestions}
+          />
+        </main>
+
+        {/* ── Right Panel ───────────────────────────────────────────────────── */}
+        <aside
+          className="flex-shrink-0 w-56 border-l border-stone-200 overflow-y-auto"
+          style={{ backgroundColor: '#F9F8F6' }}
+        >
+          <RightPanel
+            selected={selectedObject}
+            selectedType={selectedType}
+            onAccept={handleAccept}
+            onReject={handleReject}
+            onReschedule={handleReschedule}
+            onEdit={setEditTarget}
+          />
+        </aside>
       </div>
+
+      {/* ── Modals ────────────────────────────────────────────────────────────── */}
+      {editTarget && (
+        <EditSuggestionModal
+          suggestion={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSave={handleEditSave}
+        />
+      )}
+
+      {rescheduleTarget && (
+        <RescheduleModal
+          suggestion={rescheduleTarget}
+          availableBlocks={
+            // Other pending time blocks not already occupied by this suggestion
+            suggestions
+              .filter(s => s.id !== rescheduleTarget.id && s.status === 'pending' && s.time_block)
+              .map(s => s.time_block)
+              .filter((b, i, arr) => arr.findIndex(x => x.id === b.id) === i)
+          }
+          onClose={() => setRescheduleTarget(null)}
+          onSelect={(block) => {
+            console.log('[Dashboard] Rescheduled to block:', block)
+            setRescheduleTarget(null)
+          }}
+        />
+      )}
     </div>
   )
 }

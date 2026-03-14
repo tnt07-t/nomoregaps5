@@ -1,10 +1,13 @@
 import { useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { api } from '../utils/api'
 
 /**
  * AuthCallback - Handles the redirect from Google OAuth.
- * Reads ?user_id=X from the URL, persists it, then navigates forward.
+ * Reads ?user_id=X, persists auth state, then routes:
+ *   - new user (no goals)  → /onboarding/buffer
+ *   - returning user       → /dashboard
  */
 export default function AuthCallback() {
   const navigate = useNavigate()
@@ -20,13 +23,32 @@ export default function AuthCallback() {
       return
     }
 
-    if (userIdParam) {
-      login({ user_id: userIdParam })
-      navigate('/onboarding/preferences', { replace: true })
-    } else {
-      // No user_id and no error — redirect home
+    if (!userIdParam) {
       navigate('/', { replace: true })
+      return
     }
+
+    async function finishLogin() {
+      try {
+        // Fetch user info to get name/email for localStorage
+        const me = await api.getMe(userIdParam)
+        login({ user_id: userIdParam, name: me.user.name, email: me.user.email })
+
+        // Check if user already has goals — if so skip onboarding
+        const goals = await api.getGoals(userIdParam)
+        if (goals && goals.length > 0) {
+          navigate('/dashboard', { replace: true })
+        } else {
+          navigate('/onboarding/buffer', { replace: true })
+        }
+      } catch (_) {
+        // On any error just start onboarding fresh
+        login({ user_id: userIdParam })
+        navigate('/onboarding/buffer', { replace: true })
+      }
+    }
+
+    finishLogin()
   }, [])
 
   return (

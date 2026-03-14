@@ -101,17 +101,8 @@ export default function LandingPage() {
     setError(null)
 
     try {
-      const useMock = import.meta.env.VITE_USE_MOCK_DATA === 'true' || true
-
-      if (useMock) {
-        // Mock login: POST /auth/mock-login
-        const data = await api.mockLogin()
-        login({ user_id: data.user_id, name: data.name, email: data.email })
-        navigate('/onboarding/preferences')
-      } else {
-        // Real OAuth: redirect to backend which redirects to Google
-        window.location.href = `${API_BASE}/auth/google`
-      }
+      // Real Google OAuth — backend controls mock/real via USE_MOCK_DATA env var
+      window.location.href = `${API_BASE}/auth/google`
     } catch (err) {
       setError(err.message || 'Failed to sign in. Is the backend running?')
       setLoading(false)
