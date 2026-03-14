@@ -1,6 +1,30 @@
 const rawBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 export const API_BASE = rawBase.replace(/\/+$/, '')
 
+export function getApiBaseConfigIssue() {
+  if (!import.meta.env.PROD) return null
+
+  const configured = (import.meta.env.VITE_API_BASE || '').trim()
+  if (!configured) {
+    return 'Missing VITE_API_BASE in production. Set it to your backend URL.'
+  }
+
+  try {
+    const apiUrl = new URL(API_BASE)
+    const appUrl = new URL(window.location.origin)
+    const sameOrigin = apiUrl.origin === appUrl.origin
+    const hasApiPrefix = apiUrl.pathname === '/api' || apiUrl.pathname.startsWith('/api/')
+
+    if (sameOrigin && !hasApiPrefix) {
+      return 'VITE_API_BASE points to this frontend domain. Set it to your backend URL.'
+    }
+  } catch (_) {
+    return 'Invalid VITE_API_BASE. Set it to a full backend URL (for example https://api.yourdomain.com).'
+  }
+
+  return null
+}
+
 /**
  * Generic fetch wrapper with error handling.
  * Returns parsed JSON on success, throws on non-2xx.
@@ -20,7 +44,14 @@ export async function apiFetch(path, options = {}) {
     try {
       const body = await res.json()
       errMsg = body.detail || body.message || errMsg
-    } catch (_) {}
+    } catch (_) {
+      try {
+        const text = await res.text()
+        if (text.includes('Code: NOT_FOUND')) {
+          errMsg = 'Backend endpoint not found. Check VITE_API_BASE points to your backend service.'
+        }
+      } catch (_) {}
+    }
     throw new Error(errMsg)
   }
 

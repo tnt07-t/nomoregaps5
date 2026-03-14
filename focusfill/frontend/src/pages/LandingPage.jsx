@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, API_BASE } from '../utils/api'
+import { API_BASE, getApiBaseConfigIssue } from '../utils/api'
 import { useAuth } from '../hooks/useAuth'
 import StepIndicator from '../components/StepIndicator'
 import BrandHeader from '../components/BrandHeader'
@@ -101,6 +101,13 @@ export default function LandingPage() {
     setError(null)
 
     try {
+      const configIssue = getApiBaseConfigIssue()
+      if (configIssue) {
+        setError(configIssue)
+        setLoading(false)
+        return
+      }
+
       // Real Google OAuth — backend controls mock/real via USE_MOCK_DATA env var
       window.location.href = `${API_BASE}/auth/google`
     } catch (err) {
