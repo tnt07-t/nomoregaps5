@@ -44,26 +44,43 @@ def score_task_for_block(task, gap: dict, user_goals: list, feedback_history: li
 
 
 def get_top_suggestions(gaps: list, tasks: list, user_goals: list,
-                         feedback_history: list, top_n: int = 3) -> list:
+                         feedback_history: list, top_n: int = 3,
+                         daily_usage: dict | None = None) -> list:
     """
     For each gap, score all tasks and return the top-N (task, gap, score, reason) tuples.
-    Returns a flat list of dicts.
+    Enforces daily_limit: tasks already at their daily cap are skipped.
+
+    daily_usage: {task_id: count} of tasks already suggested/accepted today in the DB.
+    We also track within this generation pass so the same task isn't pushed into
+    every single gap if it has a low daily_limit.
     """
+    if daily_usage is None:
+        daily_usage = {}
+
+    # Count how many times we assign each task in this generation pass
+    session_usage: dict = {}
+
     results = []
     for gap in gaps:
         scored = []
         for task in tasks:
+            task_id     = _attr(task, "id")
+            daily_limit = _attr(task, "daily_limit", None)
+
+            if daily_limit is not None:
+                used = daily_usage.get(task_id, 0) + session_usage.get(task_id, 0)
+                if used >= daily_limit:
+                    continue  # already at cap — skip this task for today
+
             s = score_task_for_block(task, gap, user_goals, feedback_history)
             scored.append((task, gap, s))
+
         scored.sort(key=lambda x: x[2], reverse=True)
         for task, g, score in scored[:top_n]:
+            task_id = _attr(task, "id")
+            session_usage[task_id] = session_usage.get(task_id, 0) + 1
             reason = get_rule_based_reason(task, g)
-            results.append({
-                "task": task,
-                "gap": g,
-                "score": score,
-                "reason": reason,
-            })
+            results.append({"task": task, "gap": g, "score": score, "reason": reason})
     return results
 
 

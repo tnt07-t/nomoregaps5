@@ -2,7 +2,7 @@
 Suggestions router — generate and retrieve task suggestions.
 """
 import os
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date as date_type
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -153,12 +153,30 @@ def generate_suggestions(
         enriched["time_block_id"] = block.id
         enriched_gaps.append(enriched)
 
+    # Build daily_usage: count pending/accepted suggestions per task per day
+    # This ensures daily_limit is respected across generation calls
+    today_str = str(date_type.today())
+    today_suggestions = (
+        db.query(models.Suggestion)
+        .join(models.TimeBlock, models.Suggestion.time_block_id == models.TimeBlock.id)
+        .filter(
+            models.Suggestion.user_id == user_id,
+            models.Suggestion.status.in_(["pending", "accepted"]),
+            models.TimeBlock.date == today_str,
+        )
+        .all()
+    )
+    daily_usage: dict = {}
+    for s in today_suggestions:
+        daily_usage[s.task_id] = daily_usage.get(s.task_id, 0) + 1
+
     scored = get_top_suggestions(
         gaps=enriched_gaps,
         tasks=tasks,
         user_goals=user_goals,
         feedback_history=feedback_history,
         top_n=3,
+        daily_usage=daily_usage,
     )
 
     # Store suggestions (skip duplicates for same block+task)

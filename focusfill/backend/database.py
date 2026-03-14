@@ -28,3 +28,20 @@ def create_tables():
         CalendarEvent, TimeBlock, Task, Suggestion, FeedbackEvent
     )
     Base.metadata.create_all(bind=engine)
+    _migrate()
+
+
+def _migrate():
+    """Add new columns to existing tables without dropping data."""
+    migrations = [
+        "ALTER TABLE tasks ADD COLUMN daily_limit INTEGER",
+        "ALTER TABLE tasks ADD COLUMN llm_generated BOOLEAN DEFAULT 0",
+        "ALTER TABLE goal_tasks ADD COLUMN daily_limit INTEGER",
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(__import__("sqlalchemy").text(sql))
+                conn.commit()
+            except Exception:
+                pass  # column already exists — safe to ignore

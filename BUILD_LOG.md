@@ -1,11 +1,11 @@
-# TimeFiller — Build Log
+# NoMoreGaps — Build Log
 
 > Read this before every build phase. Update after every phase.
 
 ---
 
 ## Current Status
-**Phase:** 3 — Goal Management ✅ COMPLETE
+**Phase:** 4 — LLM Integration + Daily Limits ✅ COMPLETE
 **Last updated:** 2026-03-14
 **Backend:** Running on http://localhost:8000
 **Frontend:** Running on http://localhost:3000
@@ -158,29 +158,46 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 
 ---
 
-## Phase 4 — LLM Integration (PLANNED)
-**Goal:** Claude generates suggestion reason strings; rule-based fallback always present.
+### Phase 3b — Real OAuth + GCal Write-back + Branding (2026-03-14)
+**Goal:** Replace mock auth with real Google OAuth, write accepted tasks back to GCal, rename to NoMoreGaps.
 
-**TODO:**
-- [ ] Implement `services/llm_service.py` — Anthropic API call + cache per event
-- [ ] Wrap in try/except; fallback = rule-based reason string
-- [ ] Wire into suggestion generation pipeline
+#### Files Updated
+- `routers/auth.py` — real Google OAuth `/auth/google` + `/auth/google/callback`; renamed brand to "NoMoreGaps"
+- `routers/feedback.py` — real GCal write-back on accept; `creds.refresh(Request())` for expired tokens; user timezone; `colorId: "2"` (sage green)
+- `pages/LandingPage.jsx` — removed `|| true` mock bypass; always uses real Google OAuth
+- `pages/AuthCallback.jsx` — fetches `/auth/me` + `/goals/` to route new vs returning users; new → `/onboarding/buffer`, returning → `/dashboard`
+- `App.jsx` — localStorage key renamed to `nomoregaps_user_id`
 
----
-
-## Phase 5 — Accept/Reject + GCal Write-back (PLANNED)
-**TODO:**
-- [ ] Implement `routers/feedback.py` fully
-- [ ] On accept: write event to Google Calendar (mock = log ID)
-- [ ] On accept: change SuggestionBlock to solid EventBlock
-- [ ] On reject: hide block, store FeedbackEvent
+#### Known Issues Fixed
+- 🐛 `GOOGLE_CLIENT_ID` in `.env` was a full JSON blob → fixed to just the client ID string
+- 🐛 Token expiry not handled in feedback.py → added `creds.refresh(Request())`
+- 🐛 `AuthCallback.jsx` always redirected to `/onboarding/preferences` (wrong route) → fixed
 
 ---
 
-## Phase 6 — Polish (STRETCH)
-- [ ] Mode selector (Productive / Low Energy / Passive) — re-generates suggestions
-- [ ] Progress bars for weekly goal minutes
-- [ ] Spotify integration
+### Phase 4 — LLM Integration + Daily Limits (2026-03-14)
+**Goal:** Claude generates personalized tasks per goal; per-task daily suggestion caps.
+
+#### Files Created / Updated
+- `services/llm_service.py` — NEW: `generate_tasks_for_goal()` calls `claude-sonnet-4-20250514`; `generate_explanation()` calls `claude-haiku-4-5-20251001`; rule-based fallback by category
+- `models.py` — added `daily_limit: Integer` to `GoalTask` and `Task`; added `llm_generated: Boolean` to `Task`
+- `seed_tasks.py` — all 12 seed tasks updated with explicit `daily_limit` values (1 for diminishing-return tasks, 2-3 for learning/practice)
+- `services/suggestion_engine.py` — `get_top_suggestions()` accepts `daily_usage` dict; enforces per-task daily cap using DB usage + session usage tracking
+- `routers/suggestions.py` — computes `daily_usage` from today's pending/accepted suggestions before calling engine
+- `routers/goals.py` — `POST /goals/` and `PUT /goals/{goal_id}` trigger `_generate_and_save_tasks()` via FastAPI `BackgroundTasks`; saves Claude's tasks as `GoalTask` records
+
+#### Design Decisions
+- LLM called ONLY on goal create/update (not on every suggestion generation) — cost control
+- Claude decides `daily_limit` per task based on task type (1 for email/tidying, 2-3 for practice)
+- Two-layer limit enforcement: `daily_usage` (from DB) + `session_usage` (within current batch)
+- If `ANTHROPIC_API_KEY` missing or invalid → falls back to rule-based tasks silently
+
+---
+
+## Phase 5 — Polish / Stretch (PLANNED)
+- [ ] Mode selector (Productive / Low Energy / Passive) — re-generates suggestions on change
+- [ ] Progress bars for weekly goal minutes in dashboard sidebar
+- [ ] Spotify integration (stretch)
 
 ---
 
@@ -211,3 +228,7 @@ npm run dev   # port 3000
 | Date | Phase | Error | Status | Fix |
 |------|-------|-------|--------|-----|
 | 2026-03-14 | 1 | postcss.config.js module type warning | ⚠️ non-blocking | add "type":"module" to package.json if needed |
+| 2026-03-14 | 3b | GOOGLE_CLIENT_ID was full JSON blob in .env | ✅ fixed | replaced with just the client ID string |
+| 2026-03-14 | 3b | GCal write-back failed on expired token | ✅ fixed | added creds.refresh(Request()) in feedback.py |
+| 2026-03-14 | 3b | AuthCallback always redirected to wrong route | ✅ fixed | checks goals to route new vs returning users |
+| 2026-03-14 | 4 | suggestions.py: date.today() shadowed by `date` param | ⚠️ watch | renamed query param to avoid collision |

@@ -1,11 +1,51 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
-from database import get_db
+from database import get_db, SessionLocal
 import models
 import schemas
+from services.llm_service import generate_tasks_for_goal
 
 router = APIRouter(prefix="/goals", tags=["goals"])
+
+
+def _generate_and_save_tasks(goal_id: int) -> None:
+    """Background task: call LLM to generate tasks for a goal and save as GoalTask records."""
+    db = SessionLocal()
+    try:
+        goal = db.query(models.Goal).filter(models.Goal.id == goal_id).first()
+        if not goal:
+            return
+
+        # Get existing task titles to avoid duplicates
+        existing_titles = [t.title for t in goal.tasks]
+
+        weekly_hours = goal.weekly_target_minutes / 60.0
+        generated = generate_tasks_for_goal(
+            goal_title=goal.title,
+            goal_category=goal.category,
+            weekly_target_hours=weekly_hours,
+            existing_task_titles=existing_titles,
+        )
+
+        for t in generated:
+            task = models.GoalTask(
+                goal_id=goal.id,
+                user_id=goal.user_id,
+                title=t["title"],
+                estimated_minutes=t.get("estimated_minutes", 25),
+                effort_level=t.get("effort_level", "medium"),
+                location_requirement=t.get("location_requirement", "anywhere"),
+                mobility_requirement=t.get("mobility_requirement", "stationary"),
+                daily_limit=t.get("daily_limit", 2),
+            )
+            db.add(task)
+        db.commit()
+        print(f"[goals] Generated {len(generated)} LLM tasks for goal {goal_id}")
+    except Exception as exc:
+        print(f"[goals] LLM task generation failed for goal {goal_id}: {exc}")
+    finally:
+        db.close()
 
 
 @router.get("/", response_model=List[schemas.GoalOut])
@@ -21,7 +61,7 @@ def get_goals(user_id: int = Query(...), db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=schemas.GoalOut)
-def create_goal(body: schemas.GoalCreate, db: Session = Depends(get_db)):
+def create_goal(body: schemas.GoalCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Create a new goal with optional tasks."""
     user = db.query(models.User).filter(models.User.id == body.user_id).first()
     if not user:
@@ -63,11 +103,15 @@ def create_goal(body: schemas.GoalCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(goal)
 
+    # Trigger LLM task generation in background (only if no tasks were manually provided)
+    if not body.tasks:
+        background_tasks.add_task(_generate_and_save_tasks, goal.id)
+
     return schemas.GoalOut.model_validate(goal)
 
 
 @router.put("/{goal_id}", response_model=schemas.GoalOut)
-def update_goal(goal_id: int, body: schemas.GoalUpdate, db: Session = Depends(get_db)):
+def update_goal(goal_id: int, body: schemas.GoalUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Update a goal."""
     goal = db.query(models.Goal).filter(models.Goal.id == goal_id).first()
     if not goal:
@@ -79,6 +123,11 @@ def update_goal(goal_id: int, body: schemas.GoalUpdate, db: Session = Depends(ge
 
     db.commit()
     db.refresh(goal)
+
+    # Regenerate LLM tasks when goal title/category/target changes
+    if any(k in update_data for k in ("title", "category", "weekly_target_minutes")):
+        background_tasks.add_task(_generate_and_save_tasks, goal.id)
+
     return schemas.GoalOut.model_validate(goal)
 
 
