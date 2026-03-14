@@ -1,19 +1,19 @@
 # NoMoreGaps
 
-> Turn calendar white space into focused work. NoMoreGaps reads your Google Calendar, detects fragmented free time, and suggests context-aware tasks as dashed "tentative" blocks. Accept one — it writes back to your calendar in sage green. The system learns from your feedback and re-ranks tasks on every sync using an LLM.
+> Your calendar has more free time than you think — it's just fragmented. NoMoreGaps connects to Google Calendar, finds every hidden gap in your week, and fills it with the right task at the right moment. Powered by Claude AI, it learns your goals, work style, and habits to deliver hyper-personalized suggestions that actually fit your life. Accept a suggestion and it lands in your calendar automatically.
 
 ---
 
 ## Features
 
-- **Google Calendar sync** — reads your real events, detects free gaps (≥15 min, 8AM–10PM)
-- **Smart suggestions** — deterministic scoring formula + LLM priority boosts per sync
-- **Accept / Reject flow** — accepted tasks write back to GCal; siblings auto-rejected
-- **Goal tracking** — set goals, LLM generates subtasks, sidebar shows Now/Next/Planned per goal
-- **Weekly + daily limits** — prevents over-suggesting the same task
-- **Anti-repetition** — title + category fatigue penalties diversify suggestions across time blocks
-- **Onboarding** — 4-step flow collecting goals, preferences, and work style
-- **Full OAuth 2.0** — Google sign-in with automatic token refresh
+- **AI-Powered Personalization** — Claude re-ranks every suggestion on each sync based on your goals, past behavior, energy preferences, and context. No two users see the same recommendations.
+- **Google Calendar Integration** — reads your real schedule, detects free gaps (≥15 min, 8AM–10PM), and writes accepted tasks back as calendar events in real time
+- **Goal-Aware Suggestions** — set your goals during onboarding; Claude generates tailored subtasks and the sidebar tracks Now / Next / Planned progress per goal throughout your week
+- **Smart Onboarding** — 4-step flow captures your work style, location flexibility, energy levels, and goals so suggestions are relevant from day one
+- **Accept / Reject Learning Loop** — every interaction teaches the system; accepted and rejected tasks shape future scoring so recommendations improve over time
+- **Anti-Repetition Engine** — title + category fatigue penalties and novelty bonuses ensure suggestions stay fresh and diverse across adjacent time blocks
+- **Live Calendar Write-back** — accepted tasks appear in Google Calendar instantly (sage green), with full OAuth token refresh handled automatically
+- **Daily & Weekly Limits** — prevents burnout by capping how often any task can be suggested, enforced per user across the full week
 
 ---
 
@@ -45,16 +45,6 @@
 | Frontend hosting | Vercel |
 | Backend hosting | Render |
 | Database (prod) | Supabase (PostgreSQL) |
-
----
-
-## LLM Usage
-
-| Function | Model | Trigger | Output |
-|---|---|---|---|
-| `generate_tasks_for_goal()` | claude-sonnet-4-20250514 | Goal create/update | 4 tasks with daily limits |
-| `reprioritize_tasks()` | claude-haiku-4-5-20251001 | Every GCal sync | `{task_id: boost}` (-0.3 → +0.3) |
-| `generate_explanation()` | claude-haiku-4-5-20251001 | On demand | 1-sentence reason string |
 
 ---
 
