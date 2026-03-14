@@ -2,6 +2,7 @@
 Events router — sync calendar events and retrieve stored events.
 """
 import os
+import json
 from datetime import datetime, timedelta, date
 from typing import List
 
@@ -18,6 +19,18 @@ USE_MOCK_DATA = os.getenv("USE_MOCK_DATA", "true").lower() == "true"
 SYNC_COOLDOWN_HOURS = 6
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+
+def _task_visible_to_user(task: models.Task, user_id: int) -> bool:
+    if task.source_type == "system":
+        return True
+    if task.source_type != "user" or not task.metadata_json:
+        return False
+    try:
+        metadata = json.loads(task.metadata_json)
+    except Exception:
+        return False
+    return metadata.get("user_id") == user_id
 
 
 @router.post("/sync", response_model=List[schemas.CalendarEventOut])
@@ -142,7 +155,7 @@ def sync_events(
     # Re-score tasks based on user goals + feedback patterns (async-friendly: runs in same request)
     try:
         goals = db.query(models.Goal).filter(models.Goal.user_id == user_id, models.Goal.is_active == True).all()
-        tasks_all = db.query(models.Task).all()
+        tasks_all = [t for t in db.query(models.Task).all() if _task_visible_to_user(t, user_id)]
         feedback_history = db.query(models.FeedbackEvent).filter(models.FeedbackEvent.user_id == user_id).all()
         boosts = reprioritize_tasks(goals, tasks_all, feedback_history)
         for task in tasks_all:

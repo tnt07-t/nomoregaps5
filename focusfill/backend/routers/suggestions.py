@@ -2,6 +2,7 @@
 Suggestions router — generate and retrieve task suggestions.
 """
 import os
+import json
 from datetime import datetime, timedelta, date as date_type
 from typing import List, Optional
 
@@ -18,6 +19,20 @@ from services.suggestion_engine import get_top_suggestions
 USE_MOCK_DATA = os.getenv("USE_MOCK_DATA", "true").lower() == "true"
 
 router = APIRouter(prefix="/suggestions", tags=["suggestions"])
+
+
+def _task_visible_to_user(task: models.Task, user_id: int) -> bool:
+    if task.source_type == "system":
+        return True
+    if task.source_type != "user":
+        return False
+    if not task.metadata_json:
+        return False
+    try:
+        metadata = json.loads(task.metadata_json)
+    except Exception:
+        return False
+    return metadata.get("user_id") == user_id
 
 
 @router.post("/generate", response_model=List[schemas.SuggestionOut])
@@ -63,6 +78,29 @@ def generate_suggestions(
     else:
         start_dt = datetime(week_start.year, week_start.month, week_start.day)
         end_dt   = datetime(week_end.year, week_end.month, week_end.day)
+
+    # Clear stale pending suggestions in the target range so each generation is fresh.
+    stale_pending_ids = [
+        s.id
+        for s in (
+            db.query(models.Suggestion)
+            .join(models.TimeBlock, models.Suggestion.time_block_id == models.TimeBlock.id)
+            .filter(
+                models.Suggestion.user_id == user_id,
+                models.Suggestion.status == "pending",
+                models.TimeBlock.start_time >= start_dt,
+                models.TimeBlock.start_time < end_dt,
+            )
+            .all()
+        )
+    ]
+    if stale_pending_ids:
+        (
+            db.query(models.Suggestion)
+            .filter(models.Suggestion.id.in_(stale_pending_ids))
+            .delete(synchronize_session=False)
+        )
+        db.commit()
 
     # Fetch stored events in range
     events = (
@@ -158,8 +196,9 @@ def generate_suggestions(
 
     db.commit()
 
-    # Get all tasks
-    tasks = db.query(models.Task).all()
+    # Get all system tasks plus this user's custom/LLM-generated tasks.
+    all_tasks = db.query(models.Task).all()
+    tasks = [t for t in all_tasks if _task_visible_to_user(t, user_id)]
     if not tasks:
         return []
 
@@ -183,7 +222,7 @@ def generate_suggestions(
         enriched["time_block_id"] = block.id
         enriched_gaps.append(enriched)
 
-    # Build daily_usage and weekly_usage dicts to enforce limits
+    # Build daily/weekly usage dicts to enforce limits
     today_str = str(date_type.today())
     week_start_str = str(date_type.today() - timedelta(days=date_type.today().weekday()))
 
@@ -199,9 +238,12 @@ def generate_suggestions(
     )
     daily_usage: dict = {}
     weekly_usage: dict = {}
+    weekly_minutes_usage: dict = {}
     for s in period_suggestions:
         block_date = s.time_block.date if s.time_block else None
+        block_minutes = s.time_block.duration_minutes if s.time_block else 0
         weekly_usage[s.task_id] = weekly_usage.get(s.task_id, 0) + 1
+        weekly_minutes_usage[s.task_id] = weekly_minutes_usage.get(s.task_id, 0) + block_minutes
         if block_date == today_str:
             daily_usage[s.task_id] = daily_usage.get(s.task_id, 0) + 1
 
@@ -213,6 +255,7 @@ def generate_suggestions(
         top_n=3,
         daily_usage=daily_usage,
         weekly_usage=weekly_usage,
+        weekly_minutes_usage=weekly_minutes_usage,
     )
 
     # Store suggestions (skip duplicates for same block+task)

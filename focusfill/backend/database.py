@@ -48,3 +48,68 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass  # column already exists — safe to ignore
+
+        # Data fixups (idempotent)
+        try:
+            conn.execute(__import__("sqlalchemy").text(
+                """
+                UPDATE tasks
+                SET min_duration = 60,
+                    max_duration = 90,
+                    effort_level = 'low',
+                    daily_limit = 1,
+                    weekly_limit = 1
+                WHERE lower(title) LIKE '%laundry%'
+                """
+            ))
+            conn.commit()
+        except Exception:
+            pass
+
+        # Remove student-specific default wording for generic users.
+        try:
+            conn.execute(__import__("sqlalchemy").text(
+                """
+                UPDATE tasks
+                SET title = 'Review Priority List',
+                    category = 'Life Admin',
+                    goal_tag = 'life_admin',
+                    min_duration = 10,
+                    max_duration = 25,
+                    effort_level = 'low',
+                    daily_limit = COALESCE(daily_limit, 1),
+                    weekly_limit = COALESCE(weekly_limit, 5)
+                WHERE source_type = 'system' AND lower(title) = 'review notes'
+                """
+            ))
+            conn.commit()
+        except Exception:
+            pass
+
+        # Backfill limits for legacy rows created before limit columns existed.
+        try:
+            conn.execute(__import__("sqlalchemy").text(
+                """
+                UPDATE tasks
+                SET daily_limit = COALESCE(daily_limit, 2),
+                    weekly_limit = COALESCE(weekly_limit, 10)
+                WHERE daily_limit IS NULL OR weekly_limit IS NULL
+                """
+            ))
+            conn.commit()
+        except Exception:
+            pass
+
+        # Keep key system tasks bounded even on old databases.
+        try:
+            conn.execute(__import__("sqlalchemy").text(
+                """
+                UPDATE tasks
+                SET daily_limit = 1,
+                    weekly_limit = 5
+                WHERE source_type = 'system' AND lower(title) IN ('prep agenda', 'reply to emails')
+                """
+            ))
+            conn.commit()
+        except Exception:
+            pass

@@ -37,12 +37,17 @@ User, UserPreference, Goal, GoalTask, CalendarEvent, TimeBlock, Task, Suggestion
 ## Key Design Rules
 - Matching/ranking is DETERMINISTIC (rule-based scoring formula + LLM priority_boost)
 - LLM called for: (1) task generation on goal create/update, (2) re-prioritization on each sync, (3) explanation strings (optional, with fallback)
+- Onboarding subtasks are persisted to GoalTask and mirrored into user task-library rows in `tasks` (`source_type="user"`)
 - DB migrations run automatically on startup via `database._migrate()` — safe to add new ALTER TABLE statements there
 - Only fetch/process events within current 7-day week
 - Suggestions appear as dashed blocks; accepted = solid; rejected = hidden
 - **Only 1 suggestion shown per time_block** (WeekView deduplicates by time_block_id)
 - Accepting a suggestion auto-rejects all sibling suggestions for the same time_block
 - Large gaps (>90 min) are subdivided into 60-min sub-blocks in suggestions.py
+- Goals sidebar in calendar view must show what user is working on now/next per goal
+- Suggestions must remain role-agnostic (no default student assumptions)
+- Suggestion regeneration must clear stale in-range pending suggestions and recompute fresh candidates
+- Suggestions must diversify across adjacent time blocks (title and category fatigue penalties in scorer)
 - Backend uses Python 3.11 venv (Python 3.14 breaks pydantic v1)
 - `from __future__ import annotations` required in Python 3.11 files using `X | Y` union types
 
@@ -60,6 +65,8 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 - Enforced in `suggestion_engine.get_top_suggestions()` via `daily_usage` + `weekly_usage` dicts
 - `session_usage` dict prevents over-assignment within a single generation call
 - Seed task examples: "Reply to Emails" → daily=1, weekly=5; "Chess Tactics" → daily=2, weekly=14
+- Laundry policy: low effort only, continuous block (>=60 min), hard max 90 min/week
+- Legacy tasks with missing limits are backfilled at startup migration (`daily_limit`, `weekly_limit`)
 
 ## LLM Usage (cost-controlled)
 | Function | Model | Trigger | Output |
@@ -85,6 +92,7 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 - Sync now validates/refreshes OAuth tokens before GCal fetch
 - Expired or invalid OAuth now returns explicit `401` (reconnect required), not silent empty data
 - Non-auth Google Calendar API failures return `502` from `/events/sync`
+- Claude re-prioritization runs only when remote sync actually executes (not during cooldown short-circuit)
 - Accept → writes to GCal with `colorId: "2"` (sage green); token refresh handled automatically
 - `users.last_synced_at` tracks last remote fetch
 - `suggestions.gcal_event_id` stores written GCal event ID
@@ -110,10 +118,16 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 ✅ Weekly + daily limit enforcement in suggestion engine
 ✅ LLM task generation on goal create/update (BackgroundTasks)
 ✅ LLM re-prioritization on every GCal sync (Haiku, cost-minimal)
+✅ Onboarding goals/subtasks mirrored into user task library used by suggestion generation
 ✅ React week-view calendar (dashed = pending, solid = accepted, hidden = rejected)
 ✅ 1 suggestion per time block in UI (no overlapping blocks)
 ✅ Goal management page (/goals)
 ✅ Dashboard: mini-calendar, goals progress sidebar, week nav, sync button
+✅ Goals sidebar now shows `Now/Next/Planned` task context per goal
+✅ Laundry constraints enforced (continuous + low effort + weekly minute cap)
+✅ Student-biased default task wording removed; anti-repetition scoring penalties added
+✅ Suggestion runs now clear stale pending rows before regeneration (accepted history retained)
+✅ Strong diversification tuning: adjacent-title penalty + category fatigue + novelty bonus
 
 ## Remaining / Stretch
 - [ ] Mode selector (Productive / Low Energy / Passive) → re-generate suggestions on change

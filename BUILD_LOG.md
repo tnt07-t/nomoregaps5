@@ -5,7 +5,7 @@
 ---
 
 ## Current Status
-**Phase:** 5c — GCal Auth Reliability ✅ COMPLETE
+**Phase:** 5h — Strong Diversification Tuning ✅ COMPLETE
 **Last updated:** 2026-03-14
 **Backend:** Running on http://localhost:8000
 **Frontend:** Running on http://localhost:3000
@@ -248,6 +248,86 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 
 ---
 
+### Phase 5d — Onboarding Goal Tasks + LLM Call Gating (2026-03-14)
+**Goal:** Use onboarding goals/subtasks in initial suggestions and keep Claude calls constrained.
+
+#### Files Updated
+- `routers/goals.py` — onboarding subtasks now sync into `tasks` as user-scoped task-library entries; create-goal always schedules one initial LLM generation; LLM-generated tasks are also mirrored into `tasks`; goal-task add/update/delete keeps task-library entries in sync
+- `routers/suggestions.py` — suggestion generation now uses system tasks + user-owned task-library entries (filtered via task metadata)
+- `routers/events.py` — reprioritization now runs only over the same user-visible task set (system + user-owned tasks)
+
+#### Build Results
+- ✅ `python -m py_compile routers/goals.py routers/suggestions.py routers/events.py` passes
+- ✅ `python -c "from main import app"` passes
+- ✅ Manual check: goal create with one onboarding subtask produced one user task entry and one queued background LLM task
+
+#### Design Decisions
+- Claude calls remain bounded to:
+- Goal create/update via background generation
+- Calendar sync when remote fetch actually runs (6h throttle still enforced)
+- No Claude calls added to suggestion generation or feedback paths
+
+---
+
+### Phase 5e — Goal Visibility + Laundry Policy (2026-03-14)
+**Goal:** Show what each goal is currently working on in calendar view and constrain laundry behavior.
+
+#### Files Updated
+- `frontend/src/pages/Dashboard.jsx` — goals sidebar now shows per-goal task context (`Now`, `Next`, or planned onboarding task fallback) so onboarding goals/tasks are visible in calendar view
+- `backend/services/suggestion_engine.py` — added laundry guardrails: low-effort only, requires continuous 60+ minute gap, hard cap of 90 minutes per week using weekly minute tracking
+- `backend/routers/suggestions.py` — computes and passes `weekly_minutes_usage` into scorer
+- `backend/seed_tasks.py` — `Do Laundry` updated to low-effort 60–90 minute task with weekly limit 1
+- `backend/database.py` — idempotent startup data fix updates existing laundry rows to 60–90 min, low effort, daily_limit=1, weekly_limit=1
+
+#### Build Results
+- ✅ `python -m py_compile services/suggestion_engine.py routers/suggestions.py database.py` passes
+- ✅ `npm run build` passes
+
+#### Design Decisions
+- Laundry weekly cap implemented as minute-based cap (90 min/week) in scorer, not just count-based limit
+- Calendar goal display derives active context from accepted suggestions first; falls back to onboarding task list when nothing is scheduled
+
+---
+
+### Phase 5f — Suggestion Neutrality + Anti-Repetition (2026-03-14)
+**Goal:** Stop student-biased "Review Notes" spam and diversify suggestions across gaps.
+
+#### Files Updated
+- `backend/seed_tasks.py` — renamed system task `Review Notes` → `Review Priority List` with neutral Life Admin framing
+- `backend/database.py` — migration fixups rename legacy `Review Notes`, backfill NULL `daily_limit`/`weekly_limit`, and enforce limits on key repetitive system tasks
+- `backend/services/suggestion_engine.py` — added non-student guardrail (skip `review notes` unless learning context), plus repetition penalties based on session and weekly usage
+- `backend/routers/goals.py` — user task-library mirroring now assigns default limits when onboarding subtasks omit them
+
+#### Build Results
+- ✅ `python -m py_compile services/suggestion_engine.py routers/goals.py database.py seed_tasks.py` passes
+- ✅ migration run confirms no `Review Notes` rows and no NULL limit rows in `tasks`
+
+---
+
+### Phase 5g — Fresh Regeneration + De-spam (2026-03-14)
+**Goal:** Prevent stale pending suggestions from accumulating and dominating UI.
+
+#### Files Updated
+- `backend/routers/suggestions.py` — before each generation run, deletes stale `pending` suggestions in requested date range and regenerates fresh candidates (keeps `accepted` history untouched)
+
+#### Validation
+- Before fix: 248 pending suggestions for user 1, top titles heavily repeated
+- After regenerate with fix: 45 pending suggestions, diverse top titles, no `Review Notes` domination
+
+---
+
+### Phase 5h — Strong Diversification Tuning (2026-03-14)
+**Goal:** Reduce repeated suggestion titles across adjacent blocks and week-wide runs.
+
+#### Files Updated
+- `backend/services/suggestion_engine.py` — added deterministic gap ordering, title fatigue penalty, category fatigue penalty, adjacent-title repeat penalty, and novelty bonus for unused tasks
+
+#### Validation
+- ✅ `python -m py_compile services/suggestion_engine.py` passes
+- ✅ local regenerate shows 45 pending suggestions with 23 unique titles (no single title dominating)
+
+---
+
 ## Phase 6 — Remaining / Stretch (PLANNED)
 - [ ] Mode selector (Productive / Low Energy / Passive) — re-generates suggestions on change
 - [ ] Goals router: trigger LLM task generation on goal create/update (BackgroundTasks)
@@ -292,3 +372,9 @@ npm run dev   # port 3000
 | 2026-03-14 | 5 | Same task suggested repeatedly filling entire day | ✅ fixed | daily_limit + weekly_limit enforced in engine |
 | 2026-03-14 | 5 | Large free blocks not split into varied tasks | ✅ fixed | >90 min gaps subdivided into 60-min chunks in suggestions.py |
 | 2026-03-14 | 5c | Expired/invalid Google tokens produced silent empty sync results | ✅ fixed | events router now returns explicit 401/502 and calendar service no longer swallows auth/API errors |
+| 2026-03-14 | 5d | Onboarding subtasks were saved but not used by suggestion task pool | ✅ fixed | goal tasks now sync into user task library; suggestions/events filter by user-visible tasks |
+| 2026-03-14 | 5e | Goals sidebar did not show current onboarding task context | ✅ fixed | per-goal `Now/Next/Planned` status now shown in dashboard calendar view |
+| 2026-03-14 | 5e | Laundry suggestions were too fragmented and unconstrained weekly | ✅ fixed | scorer enforces low-effort + continuous 60+ min + 90 min/week cap |
+| 2026-03-14 | 5f | Suggestions were dominated by student-specific `Review Notes` | ✅ fixed | neutral task rename + legacy limit backfill + anti-repetition penalties |
+| 2026-03-14 | 5g | Pending suggestions accumulated and caused repeated stale outputs | ✅ fixed | generation now clears in-range pending suggestions before recomputing |
+| 2026-03-14 | 5h | Suggestions still felt repetitive across adjacent gaps | ✅ fixed | title/category fatigue + adjacent repeat penalty + novelty bonus in scorer |

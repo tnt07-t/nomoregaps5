@@ -46,31 +46,78 @@ def score_task_for_block(task, gap: dict, user_goals: list, feedback_history: li
 def get_top_suggestions(gaps: list, tasks: list, user_goals: list,
                          feedback_history: list, top_n: int = 3,
                          daily_usage: dict | None = None,
-                         weekly_usage: dict | None = None) -> list:
+                         weekly_usage: dict | None = None,
+                         weekly_minutes_usage: dict | None = None) -> list:
     """
     For each gap, score all tasks and return the top-N (task, gap, score, reason) tuples.
     Enforces daily_limit and weekly_limit.
 
     daily_usage:  {task_id: count} of times suggested/accepted today.
     weekly_usage: {task_id: count} of times suggested/accepted this week.
+    weekly_minutes_usage: {task_id: total minutes suggested/accepted this week}.
     session_usage tracks assignments within this single generation pass.
     """
     if daily_usage is None:
         daily_usage = {}
     if weekly_usage is None:
         weekly_usage = {}
+    if weekly_minutes_usage is None:
+        weekly_minutes_usage = {}
 
     # Count how many times we assign each task in this generation pass
     session_usage: dict = {}
+    session_minutes_usage: dict = {}
+    session_title_usage: dict = {}
+    session_category_usage: dict = {}
+    recent_titles: list[str] = []
+    def _goal_val(goal_obj, field: str) -> str:
+        if hasattr(goal_obj, field):
+            return str(getattr(goal_obj, field) or "")
+        if isinstance(goal_obj, dict):
+            return str(goal_obj.get(field, "") or "")
+        return ""
+
+    has_learning_goal = any(
+        ("learning" in _goal_val(g, "category").lower())
+        or any(k in _goal_val(g, "title").lower() for k in ("learn", "study", "exam", "class", "course"))
+        for g in user_goals
+    )
 
     results = []
-    for gap in gaps:
+    # Deterministic order so diversification behaves consistently.
+    ordered_gaps = sorted(gaps, key=lambda g: g.get("start_time"))
+    for gap in ordered_gaps:
         scored = []
+        next_title = (gap.get("next_event_title") or "").lower()
+        prev_title = (gap.get("prev_event_title") or "").lower()
+        has_learning_context = (
+            has_learning_goal
+            or any(k in next_title for k in ("exam", "quiz", "lecture", "class", "study"))
+            or any(k in prev_title for k in ("lecture", "class", "study"))
+        )
         for task in tasks:
             task_id      = _attr(task, "id")
             daily_limit  = _attr(task, "daily_limit", None)
             weekly_limit = _attr(task, "weekly_limit", None)
             p_boost      = _attr(task, "priority_boost", 0.0) or 0.0
+            task_title   = (_attr(task, "title", "") or "").lower()
+            title_key    = _normalize_title(task_title)
+            task_category = (_attr(task, "category", "") or "").lower()
+            gap_minutes  = gap.get("duration_minutes", 0)
+
+            # Avoid student-specific default task unless user/context indicates learning.
+            if "review notes" in task_title and not has_learning_context:
+                continue
+
+            # Laundry policy: keep it low-effort, continuous, and <= 90 min/week.
+            if "laundry" in task_title:
+                if (_attr(task, "effort_level", "low") or "low") != "low":
+                    continue
+                if gap_minutes < 60:
+                    continue
+                used_laundry_minutes = weekly_minutes_usage.get(task_id, 0) + session_minutes_usage.get(task_id, 0)
+                if used_laundry_minutes >= 90:
+                    continue
 
             if daily_limit is not None:
                 used = daily_usage.get(task_id, 0) + session_usage.get(task_id, 0)
@@ -84,12 +131,32 @@ def get_top_suggestions(gaps: list, tasks: list, user_goals: list,
 
             s = score_task_for_block(task, gap, user_goals, feedback_history)
             s += p_boost * 30  # scale boost into scoring range
+            # Diversify suggestions across the week so one task does not dominate every slot.
+            s -= 9 * session_usage.get(task_id, 0)
+            s -= 2 * weekly_usage.get(task_id, 0)
+            # Stronger diversification: title fatigue, category fatigue, and adjacent repeat avoidance.
+            s -= 14 * session_title_usage.get(title_key, 0)
+            s -= 4 * session_category_usage.get(task_category, 0)
+            if recent_titles and title_key == recent_titles[-1]:
+                s -= 22
+            # Encourage novelty when task has not been used yet this week/session.
+            if weekly_usage.get(task_id, 0) == 0 and session_usage.get(task_id, 0) == 0:
+                s += 5
             scored.append((task, gap, s))
 
         scored.sort(key=lambda x: x[2], reverse=True)
         for task, g, score in scored[:top_n]:
             task_id = _attr(task, "id")
+            task_title = (_attr(task, "title", "") or "").lower()
+            title_key = _normalize_title(task_title)
+            task_category = (_attr(task, "category", "") or "").lower()
             session_usage[task_id] = session_usage.get(task_id, 0) + 1
+            session_minutes_usage[task_id] = session_minutes_usage.get(task_id, 0) + g.get("duration_minutes", 0)
+            session_title_usage[title_key] = session_title_usage.get(title_key, 0) + 1
+            session_category_usage[task_category] = session_category_usage.get(task_category, 0) + 1
+            recent_titles.append(title_key)
+            if len(recent_titles) > 4:
+                recent_titles = recent_titles[-4:]
             reason = get_rule_based_reason(task, g)
             results.append({"task": task, "gap": g, "score": score, "reason": reason})
     return results
@@ -327,3 +394,10 @@ def _get_fb_action(fb):
     if isinstance(fb, dict):
         return fb.get("action")
     return None
+
+
+def _normalize_title(title: str) -> str:
+    if not title:
+        return ""
+    cleaned = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in title.lower())
+    return " ".join(cleaned.split())

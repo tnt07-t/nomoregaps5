@@ -52,6 +52,15 @@ function isToday(date) {
   return isSameDay(date, new Date())
 }
 
+function fmtClock(dt) {
+  const d = new Date(dt)
+  let h = d.getHours()
+  const m = d.getMinutes()
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  h = h % 12 || 12
+  return `${h}:${String(m).padStart(2, '0')} ${ampm}`
+}
+
 // Calculate scheduled minutes per goal from accepted suggestions
 function calcScheduledMinutes(suggestions, goals) {
   const map = {}
@@ -68,6 +77,49 @@ function calcScheduledMinutes(suggestions, goals) {
       }
     })
   })
+  return map
+}
+
+function calcCurrentTaskByGoal(suggestions, goals) {
+  const map = {}
+  const now = new Date()
+
+  goals.forEach(goal => {
+    const accepted = suggestions
+      .filter(s => {
+        if (s.status !== 'accepted' || !s.task || !s.time_block) return false
+        const tag = (s.task.goal_tag || '').trim().toLowerCase()
+        const goalTitle = (goal.title || '').trim().toLowerCase()
+        if (tag && goalTitle && tag === goalTitle) return true
+        return s.task.category === goal.category
+      })
+      .map(s => ({
+        title: s.task.title || 'Task',
+        start: new Date(s.time_block.start_time),
+        end: new Date(s.time_block.end_time),
+      }))
+      .sort((a, b) => a.start - b.start)
+
+    const current = accepted.find(x => x.start <= now && now <= x.end)
+    if (current) {
+      map[goal.id] = { label: `Now: ${current.title}`, active: true }
+      return
+    }
+
+    const upcoming = accepted.find(x => x.start > now)
+    if (upcoming) {
+      map[goal.id] = { label: `Next: ${upcoming.title} at ${fmtClock(upcoming.start)}`, active: false }
+      return
+    }
+
+    const firstOnboardingTask = goal.tasks && goal.tasks.length > 0 ? goal.tasks[0].title : null
+    if (firstOnboardingTask) {
+      map[goal.id] = { label: `Planned: ${firstOnboardingTask}`, active: false }
+    } else {
+      map[goal.id] = { label: 'No task scheduled yet', active: false }
+    }
+  })
+
   return map
 }
 
@@ -227,6 +279,7 @@ export default function Dashboard() {
 
   // Scheduled minutes per goal
   const scheduledMinutes = useMemo(() => calcScheduledMinutes(suggestions, goals), [suggestions, goals])
+  const currentTaskByGoal = useMemo(() => calcCurrentTaskByGoal(suggestions, goals), [suggestions, goals])
 
   // Handlers
   function handleSelectEvent(ev) {
@@ -364,6 +417,7 @@ export default function Dashboard() {
                     const target    = goal.weekly_target_minutes || 60
                     const pct       = Math.min(100, Math.round((scheduled / target) * 100))
                     const color     = CATEGORY_COLORS[goal.category]?.bar || '#94A3B8'
+                    const currentInfo = currentTaskByGoal[goal.id]
                     return (
                       <div key={goal.id}>
                         <div className="flex justify-between items-baseline mb-0.5">
@@ -371,6 +425,9 @@ export default function Dashboard() {
                           <span className="text-xs text-stone-400 ml-1 flex-shrink-0">
                             {Math.round(scheduled / 60 * 10) / 10}/{Math.round(target / 60 * 10) / 10}h
                           </span>
+                        </div>
+                        <div className={`text-[10px] truncate mb-1 ${currentInfo?.active ? 'text-emerald-700 font-semibold' : 'text-stone-500'}`}>
+                          {currentInfo?.label}
                         </div>
                         <div className="h-1 bg-stone-200 rounded-full overflow-hidden">
                           <div
