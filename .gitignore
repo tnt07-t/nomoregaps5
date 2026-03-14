@@ -1,0 +1,28 @@
+# ── Python ───────────────────────────────────────────────
+focusfill/backend/venv/
+focusfill/backend/__pycache__/
+focusfill/backend/**/__pycache__/
+focusfill/backend/**/*.pyc
+focusfill/backend/**/*.pyo
+
+# Database (SQLite — never commit the live DB)
+focusfill/backend/*.db
+focusfill/backend/*.sqlite3
+
+# Secrets — NEVER commit
+focusfill/backend/.env
+
+# ── Node / Frontend ──────────────────────────────────────
+focusfill/frontend/node_modules/
+focusfill/frontend/dist/
+focusfill/frontend/.vite/
+
+# ── OS / Editor ──────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── Logs ─────────────────────────────────────────────────
+*.log
+npm-debug.log*

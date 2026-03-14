@@ -65,6 +65,26 @@
 
 ---
 
+---
+
+### Phase 1b — Onboarding Redesign (2026-03-14)
+**Goal:** Rebuild all 4 onboarding steps to match PDF mockups exactly.
+
+#### Files Created / Updated
+- `src/App.jsx` — routes updated: `/onboarding/buffer`, `/onboarding/audio`, `/onboarding/goals`, `/onboarding/preview`; legacy redirect for `/onboarding/preferences`
+- `src/components/StepDots.jsx` — NEW: top-right dot progress indicator
+- `src/pages/OnboardingBuffer.jsx` — NEW: Step 1 "Set the pace" (5/10 min radio cards)
+- `src/pages/OnboardingAudio.jsx` — NEW: Step 2 "Audio Journeys" (toggle + Spotify CTA)
+- `src/pages/OnboardingGoals.jsx` — REWRITTEN: Step 3 two-column goal builder (list + editor)
+- `src/pages/OnboardingPreview.jsx` — NEW: Step 4 "Your week, curated" (mini calendar grid)
+
+#### Build Results
+- ✅ `npm run build` passes — 46 modules, 0 errors
+- ✅ Bundle size reduced: 193 kB (was 245 kB, removed @dnd-kit from Goals)
+- ⚠️ postcss.config.js module warning still present — cosmetic only
+
+---
+
 ## Phase 2 — Calendar View + Event Rendering (PLANNED)
 **Goal:** Build the main dashboard week view with real/mock Google Calendar events.
 
