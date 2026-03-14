@@ -17,11 +17,33 @@ app = FastAPI(
 
 # ─── CORS ────────────────────────────────────────────────────────────────────
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+def _frontend_origins() -> list[str]:
+    origins = {
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    }
+
+    single = (os.getenv("FRONTEND_URL") or "").strip()
+    if single:
+        origins.add(single.rstrip("/"))
+
+    multi = (os.getenv("FRONTEND_URLS") or "").strip()
+    if multi:
+        for origin in multi.split(","):
+            cleaned = origin.strip().rstrip("/")
+            if cleaned:
+                origins.add(cleaned)
+
+    return sorted(origins)
+
+
+FRONTEND_ORIGINS = _frontend_origins()
+FRONTEND_ORIGIN_REGEX = (os.getenv("FRONTEND_ORIGIN_REGEX") or "").strip() or None
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=FRONTEND_ORIGINS,
+    allow_origin_regex=FRONTEND_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

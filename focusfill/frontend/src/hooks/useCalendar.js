@@ -28,10 +28,7 @@ export function useCalendar(userId) {
     setLoading(true)
     setError(null)
     try {
-      const url = dateStr
-        ? `/suggestions/generate?user_id=${userId}&date=${dateStr}`
-        : `/suggestions/generate?user_id=${userId}`
-      const result = await fetch(`http://localhost:8000${url}`, { method: 'POST' }).then(r => r.json())
+      const result = await api.generateSuggestions(userId, dateStr)
       setSuggestions(Array.isArray(result) ? result : [])
     } catch (err) {
       console.error('[useCalendar] generateSuggestions error:', err)
@@ -55,9 +52,20 @@ export function useCalendar(userId) {
     if (!userId) return
     try {
       const updated = await api.submitFeedback({ user_id: userId, suggestion_id: suggestionId, action: 'accepted' })
-      setSuggestions(prev =>
-        prev.map(s => s.id === suggestionId ? { ...s, status: 'accepted', gcal_event_id: updated.gcal_event_id } : s)
-      )
+      setSuggestions(prev => {
+        const existing = prev.find(s => s.id === suggestionId)
+        const blockId = updated?.time_block_id || existing?.time_block_id || existing?.time_block?.id
+        return prev.map(s => {
+          if (s.id === suggestionId) {
+            return { ...s, ...updated, status: 'accepted', gcal_event_id: updated.gcal_event_id }
+          }
+          const sameBlock = blockId && ((s.time_block_id === blockId) || (s.time_block?.id === blockId))
+          if (sameBlock && s.status === 'pending') {
+            return { ...s, status: 'rejected' }
+          }
+          return s
+        })
+      })
       return updated
     } catch (err) {
       console.error('[useCalendar] acceptSuggestion error:', err)

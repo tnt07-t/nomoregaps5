@@ -9,10 +9,24 @@ import schemas
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 USE_MOCK_DATA = os.getenv("USE_MOCK_DATA", "true").lower() == "true"
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+
+
+def _frontend_url() -> str:
+    single = (os.getenv("FRONTEND_URL") or "").strip()
+    if single:
+        return single.rstrip("/")
+
+    multi = (os.getenv("FRONTEND_URLS") or "").strip()
+    if multi:
+        for candidate in multi.split(","):
+            cleaned = candidate.strip().rstrip("/")
+            if cleaned:
+                return cleaned
+
+    return "http://localhost:3000"
 
 
 @router.get("/google")
@@ -58,11 +72,13 @@ def google_oauth_callback(
     db: Session = Depends(get_db),
 ):
     """Handle Google OAuth callback."""
+    frontend_url = _frontend_url()
+
     if error:
-        return RedirectResponse(url=f"{FRONTEND_URL}?error={error}")
+        return RedirectResponse(url=f"{frontend_url}?error={error}")
 
     if not code:
-        return RedirectResponse(url=f"{FRONTEND_URL}?error=no_code")
+        return RedirectResponse(url=f"{frontend_url}?error=no_code")
 
     try:
         from google_auth_oauthlib.flow import Flow
@@ -129,10 +145,10 @@ def google_oauth_callback(
             db.add(pref)
             db.commit()
 
-        return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?user_id={user.id}")
+        return RedirectResponse(url=f"{frontend_url}/auth/callback?user_id={user.id}")
 
     except Exception as e:
-        return RedirectResponse(url=f"{FRONTEND_URL}?error=oauth_failed&detail={str(e)[:100]}")
+        return RedirectResponse(url=f"{frontend_url}?error=oauth_failed&detail={str(e)[:100]}")
 
 
 @router.post("/mock-login")

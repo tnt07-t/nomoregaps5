@@ -5,7 +5,7 @@
 ---
 
 ## Current Status
-**Phase:** 5j — Suggestion Block Collision UI Fix ✅ COMPLETE
+**Phase:** 5k — Deployment Hardening + Task Library Stabilization ✅ COMPLETE
 **Last updated:** 2026-03-14
 **Backend:** Running on http://localhost:8000
 **Frontend:** Running on http://localhost:3000
@@ -358,6 +358,30 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 
 ---
 
+### Phase 5k — Deployment Hardening + Task Library Stabilization (2026-03-14)
+**Goal:** Make frontend/backend deploy-safe for Vercel + hosted backend, and stabilize suggestion quality with reliable seed task coverage.
+
+#### Files Updated
+- `focusfill/frontend/src/utils/api.js` — API base now uses `VITE_API_BASE` with localhost fallback; suggestion date query now encoded
+- `focusfill/frontend/src/hooks/useCalendar.js` — accept action now immediately hides sibling suggestions in same time block in local state
+- `focusfill/backend/main.py` — CORS now supports `FRONTEND_URLS` (comma-separated) + optional `FRONTEND_ORIGIN_REGEX` for preview domains
+- `focusfill/backend/routers/auth.py` — OAuth callback redirect now resolves frontend base URL from env dynamically (`FRONTEND_URL` or first `FRONTEND_URLS` entry)
+- `focusfill/backend/.env.example` — added deployment env docs (`FRONTEND_URLS`, optional regex, optional `DATABASE_URL`)
+- `focusfill/frontend/.env.example` — NEW with `VITE_API_BASE`
+- `focusfill/frontend/vercel.json` — NEW SPA rewrite config (`/index.html` fallback)
+- `focusfill/backend/seed_tasks.py` — restored diversified 12-task default library, fixed repeated-seed bug, and switched to upsert behavior for existing DBs
+- `focusfill/backend/routers/suggestions.py` — days with no events now still produce full-day gaps (then split), so onboarding/user tasks can appear even on light-calendar days
+
+#### Build Results
+- ✅ `python -m py_compile` passes for updated backend modules
+- ✅ `python -c "from main import app"` passes
+- ✅ `npm run build` passes
+
+#### Notes
+- Existing tracked data in old local DB is preserved; seed upsert updates task definitions but does not delete historical rows with references
+
+---
+
 ## Phase 6 — Remaining / Stretch (PLANNED)
 - [ ] Mode selector (Productive / Low Energy / Passive) — re-generates suggestions on change
 - [ ] Goals router: trigger LLM task generation on goal create/update (BackgroundTasks)
@@ -410,3 +434,5 @@ npm run dev   # port 3000
 | 2026-03-14 | 5h | Suggestions still felt repetitive across adjacent gaps | ✅ fixed | title/category fatigue + adjacent repeat penalty + novelty bonus in scorer |
 | 2026-03-14 | 5i | Onboarding goals not appearing in preview/calendar due to broken API calls | ✅ fixed | switched onboarding pages to `api.createGoal` and `api.getGoals`, with explicit save errors |
 | 2026-03-14 | 5j | Suggestion blocks expanded on hover and overlapped nearby blocks | ✅ fixed | removed hover expansion and added side-by-side lane layout for overlapping suggestion intervals |
+| 2026-03-14 | 5k | Frontend had hardcoded localhost backend URL (breaks prod deploy) | ✅ fixed | API client now uses `VITE_API_BASE`; useCalendar calls centralized API helper |
+| 2026-03-14 | 5k | `seed_tasks` reinserted rows repeatedly and reduced task diversity | ✅ fixed | converted to idempotent upsert and restored 12 diversified default tasks |

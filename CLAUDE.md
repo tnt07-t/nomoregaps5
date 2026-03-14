@@ -11,7 +11,7 @@ Calendar-based web app that reads Google Calendar, detects fragmented free time 
 ## Stack
 - **Frontend**: React + Tailwind CSS v3 (Vite, port 3000)
 - **Backend**: FastAPI (Python 3.11), port 8000
-- **DB**: SQLite via SQLAlchemy (`focusfill/backend/nomoregaps.db`)
+- **DB**: SQLAlchemy (`DATABASE_URL` in hosted env; local fallback SQLite at `focusfill/backend/nomoregaps.db`)
 - **Auth**: Google OAuth 2.0 (real mode; `USE_MOCK_DATA=false`)
 - **LLM**: Anthropic API — `claude-sonnet-4-20250514` for task gen, `claude-haiku-4-5-20251001` for explanations + re-scoring
 - **Integrations**: Google Calendar API (read + write)
@@ -29,6 +29,12 @@ uvicorn main:app --reload --port 8000
 ```bash
 cd focusfill/frontend
 npm run dev   # runs on http://localhost:3000
+```
+
+### Frontend Env
+```bash
+# focusfill/frontend/.env
+VITE_API_BASE=http://localhost:8000
 ```
 
 ## Core Entities
@@ -53,6 +59,8 @@ User, UserPreference, Goal, GoalTask, CalendarEvent, TimeBlock, Task, Suggestion
 - Onboarding must use typed API helpers (`api.createGoal`, `api.getGoals`) and must not silently swallow save failures
 - Backend uses Python 3.11 venv (Python 3.14 breaks pydantic v1)
 - `from __future__ import annotations` required in Python 3.11 files using `X | Y` union types
+- Frontend must use `VITE_API_BASE` (no hardcoded localhost fetch calls)
+- Backend CORS/redirect config must support `FRONTEND_URLS` (+ optional `FRONTEND_ORIGIN_REGEX` for preview domains)
 
 ## Scoring Formula
 ```
@@ -100,6 +108,16 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 - `users.last_synced_at` tracks last remote fetch
 - `suggestions.gcal_event_id` stores written GCal event ID
 
+## Deployment Notes
+- Frontend includes `focusfill/frontend/vercel.json` SPA fallback rewrite.
+- Vercel frontend env:
+  - `VITE_API_BASE=https://<your-backend-domain>`
+- Backend env:
+  - `DATABASE_URL` (hosted Postgres recommended)
+  - `FRONTEND_URL` or `FRONTEND_URLS` (comma-separated)
+  - `GOOGLE_REDIRECT_URI=https://<your-backend-domain>/auth/google/callback`
+  - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ANTHROPIC_API_KEY`, `SECRET_KEY`
+
 ## Known Gotchas
 - `date` query param in suggestions.py shadowed `datetime.date` → renamed import to `date as date_type`
 - Python 3.14 breaks pydantic v1 — must use venv at `/opt/homebrew/bin/python3.11`
@@ -133,6 +151,9 @@ total_score = 30*duration_fit + 25*context_match + 20*user_goal_match
 ✅ Strong diversification tuning: adjacent-title penalty + category fatigue + novelty bonus
 ✅ Onboarding goals persist reliably and load in preview/dashboard via correct API methods
 ✅ Suggestion hover expansion removed; overlap-safe lane layout added to calendar week view
+✅ Frontend backend URL is env-driven (`VITE_API_BASE`) for production deploys
+✅ CORS/auth redirect is deployment-friendly (`FRONTEND_URLS`, optional regex support)
+✅ Seed task library is idempotent + diversified (12 upserted system tasks)
 
 ## Remaining / Stretch
 - [ ] Mode selector (Productive / Low Energy / Passive) → re-generate suggestions on change

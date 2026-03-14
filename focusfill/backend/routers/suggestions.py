@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 import schemas
-from datetime import timedelta as _td
 from services.gap_detector import detect_gaps
 from services.suggestion_engine import get_top_suggestions
 
@@ -120,19 +119,44 @@ def generate_suggestions(
         day_key = ev.start_time.date()
         events_by_day.setdefault(day_key, []).append(ev)
 
-    # Detect gaps for each day, then subdivide large ones
+    def _full_day_gap(day_obj):
+        day_start = datetime(day_obj.year, day_obj.month, day_obj.day, work_start, 0)
+        day_end = datetime(day_obj.year, day_obj.month, day_obj.day, work_end, 0)
+        duration = int((day_end - day_start).total_seconds() / 60)
+        return {
+            "date": day_obj.strftime("%Y-%m-%d"),
+            "start_time": day_start,
+            "end_time": day_end,
+            "duration_minutes": duration,
+            "prev_event_id": None,
+            "prev_event_title": None,
+            "next_event_id": None,
+            "next_event_title": None,
+            "is_mobile": False,
+            "is_home": work_start >= 19,
+            "low_setup_only": duration < 20,
+        }
+
+    # Detect gaps for each day in range, then subdivide large ones
     all_gaps = []
     CHUNK_MINUTES = 60   # max size per sub-block
     MAX_BEFORE_SPLIT = 90  # gaps longer than this get split
 
-    for day, day_events in events_by_day.items():
-        gaps = detect_gaps(
-            events=day_events,
-            work_start_hour=work_start,
-            work_end_hour=work_end,
-            min_gap_minutes=min_gap,
-            transition_buffer=buffer,
-        )
+    day_cursor = start_dt.date()
+    end_date = end_dt.date()
+    while day_cursor < end_date:
+        day_events = events_by_day.get(day_cursor, [])
+        if day_events:
+            gaps = detect_gaps(
+                events=day_events,
+                work_start_hour=work_start,
+                work_end_hour=work_end,
+                min_gap_minutes=min_gap,
+                transition_buffer=buffer,
+            )
+        else:
+            gaps = [_full_day_gap(day_cursor)]
+
         for gap in gaps:
             dur = gap["duration_minutes"]
             if dur <= MAX_BEFORE_SPLIT:
@@ -160,8 +184,9 @@ def generate_suggestions(
                     all_gaps.append(sub)
                     cursor = chunk_end
                     chunk_idx += 1
+        day_cursor += timedelta(days=1)
 
-    if not events_by_day and not all_gaps:
+    if not all_gaps:
         # No events synced yet — return empty but don't error
         return []
 

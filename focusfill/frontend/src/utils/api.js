@@ -1,4 +1,5 @@
-export const API_BASE = 'http://localhost:8000'
+const rawBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+export const API_BASE = rawBase.replace(/\/+$/, '')
 
 /**
  * Generic fetch wrapper with error handling.
@@ -89,8 +90,12 @@ export const api = {
     apiFetch(`/events/?user_id=${userId}`),
 
   // Suggestions (stubs)
-  generateSuggestions: (userId, date) =>
-    apiFetch(`/suggestions/generate?user_id=${userId}&date=${date}`, { method: 'POST' }),
+  generateSuggestions: (userId, date = null) => {
+    const query = date
+      ? `/suggestions/generate?user_id=${userId}&date=${encodeURIComponent(date)}`
+      : `/suggestions/generate?user_id=${userId}`
+    return apiFetch(query, { method: 'POST' })
+  },
 
   getSuggestions: (userId) =>
     apiFetch(`/suggestions/?user_id=${userId}`),
